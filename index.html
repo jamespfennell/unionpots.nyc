@@ -4,33 +4,53 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Union Pots</title>
+    <meta name="description" content="Union Pots is a pottery practice at Clayworks on Columbia in Brooklyn, New York, making functional pieces: bowls, mugs, plates, coffee dosing cups and planters.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://unionpots.nyc/">
+    <meta property="og:site_name" content="Union Pots">
+    <meta property="og:title" content="Union Pots">
+    <meta property="og:description" content="Union Pots is a pottery practice at Clayworks on Columbia in Brooklyn, New York, making functional pieces: bowls, mugs, plates, coffee dosing cups and planters.">
+    <meta property="og:image" content="https://unionpots.nyc/images/cups.jpg">
+    <meta property="og:image:width" content="1000">
+    <meta property="og:image:height" content="750">
+    <meta property="og:image:alt" content="selection of cups">
+    <meta name="twitter:card" content="summary_large_image">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
+        html {
+            font-size: 112.5%;
+        }
+
         body {
-            background-color: #f2e0d8;
-            font-family: 'Lora', Georgia, serif;
+            background-color: #faf8f5;
+            font-family: 'Spectral', Georgia, serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 2rem;
-            text-align: center;
+            padding: 6rem 2rem 2rem;
+        }
+
+        main {
+            width: 100%;
+            max-width: 700px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            align-items: start;
         }
 
         h1 {
+            font-weight: normal;
             font-size: 2.4rem;
-            font-weight: 500;
-            letter-spacing: 0.04em;
-            margin-bottom: 1.4rem;
+            line-height: 1em;
+            margin-bottom: 1.6rem;
         }
 
         p {
-            max-width: 360px;
             line-height: 1.75;
             font-size: 1rem;
             margin-bottom: 1.2rem;
@@ -49,23 +69,192 @@
         }
 
         .photo {
-            margin-top: 2.4rem;
+            display: block;
             width: 100%;
-            max-width: 340px;
-            border-radius: 5px;
+            height: auto;
+            border-radius: 8px;
+        }
+
+        .wide {
+            grid-column: 1 / -1;
+            justify-self: center;
+            width: 100%;
+            max-width: 500px;
+        }
+
+        .pair {
+            grid-column: 1 / -1;
+        }
+
+        /* Side-by-side photos at equal height: each grows in proportion to its aspect ratio. */
+        .pair-photos {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .pair-photos .landscape {
+            flex: 4 1 0;
+            min-width: 0;
+        }
+
+        .pair-photos .portrait {
+            flex: 2.25 1 0;
+            min-width: 0;
+        }
+
+        .poem {
+            grid-column: 1 / -1;
+            justify-self: center;
+            margin-block: 1.5rem;
+        }
+
+        .poem p {
+            margin-bottom: 0;
+        }
+
+        /* Hanging indent: a wrapped verse line continues indented, so each line's start stays clear. */
+        .poem .line {
+            display: block;
+            padding-left: 1.5em;
+            text-indent: -1.5em;
+        }
+
+        figcaption {
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+            font-style: italic;
+            text-align: center;
+        }
+
+        footer {
+            width: 100%;
+            max-width: 700px;
+            margin-top: 4rem;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+
+        footer::before {
+            content: "";
+            display: block;
+            width: 4rem;
+            margin: 0 auto 2rem;
+            border-top: 1px solid currentColor;
+        }
+
+        footer p {
+            margin-bottom: 0.6rem;
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding-top: 3rem;
+            }
+
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            .pair-photos {
+                flex-direction: column;
+            }
+
+            .pair-photos .landscape,
+            .pair-photos .portrait {
+                flex: none;
+            }
+
+            /* At 75% width a 3:4 portrait covers the same area as a full-width 4:3 landscape. */
+            .photo.portrait {
+                width: 75%;
+                margin-inline: auto;
+            }
         }
     </style>
 </head>
 <body>
-    <h1>Union Pots</h1>
-    <p>
-        Union Pots is a pottery practice based out of
-        <a href="https://www.clayworksoncolumbia.org/">Clayworks on Columbia</a>,
-        two blocks from Union Street in Brooklyn, New York City.
-        I make functional pieces such as bowls, mugs, plates, coffee dosing cups and planters.
-        To me the word "union" signifies coherence and strength, good qualities for a pot to have.
-    </p>
-    <p class="sig">— <a href="https://jpfennell.com">James</a></p>
-    <img src="image.jpeg" alt="Union Pots pottery" class="photo">
+    <main>
+        <div>
+            <h1>union<br>pots</h1>
+            <p>
+                Union Pots is a pottery practice based out of
+                <a href="https://www.clayworksoncolumbia.org/">Clayworks on Columbia</a>,
+                two blocks from Union Street in Brooklyn, New York City.
+                I make functional pieces such as bowls, mugs, plates, coffee dosing cups and planters.
+                To me the word <i>union</i> signifies coherence and strength, good qualities for a pot to have.
+            </p>
+            <p class="sig">— <a href="https://jpfennell.com">James</a></p>
+        </div>
+        <figure>
+            <img src="images/white-planter.jpg" width="750" height="1000"
+                 alt="A simple white planter and matching saucer, holding a variegated plant"
+                 class="photo portrait">
+            <figcaption>simple white planter</figcaption>
+        </figure>
+        <figure class="wide">
+            <img src="images/cups.jpg" loading="lazy" width="1000" height="750"
+                 alt="A selection of cups in speckled white, brown, green and blue glazes, stacked on a kitchen shelf"
+                 class="photo">
+            <figcaption>selection of cups</figcaption>
+        </figure>
+        <figure class="pair">
+            <div class="pair-photos">
+                <img src="images/plates-stacked.jpg" loading="lazy" width="1000" height="750"
+                     alt="The set of plates on Brooklyn red clay, stacked to show their various glazes, the bottom one blue"
+                     class="photo landscape">
+                <img src="images/plate.jpg" loading="lazy" width="750" height="1000"
+                     alt="One plate from the set seen from above, its red glaze breaking to a golden-brown ring"
+                     class="photo portrait">
+            </div>
+            <figcaption>set of plates on Brooklyn red clay; various glazes</figcaption>
+        </figure>
+        <figure class="poem">
+            <blockquote>
+                <p>
+                    <span class="line">Then I entered a strongroom of vocabulary</span>
+                    <span class="line">Where words like urns that had come through the fire</span>
+                    <span class="line">Stood in their bone-dry alcoves next a kiln&hellip;</span>
+                </p>
+            </blockquote>
+            <figcaption>Seamus Heaney, “To a Dutch Potter in Ireland”</figcaption>
+        </figure>
+        <figure>
+            <img src="images/macrocosmos-planter.jpg" loading="lazy" width="750" height="1000"
+                 alt="The macrocosmos planter, blue glaze on speckle clay with running drips and a matching saucer, holding a leafy green plant"
+                 class="photo portrait">
+            <figcaption>macrocosmos planter: blue glaze on speckle clay</figcaption>
+        </figure>
+        <figure>
+            <img src="images/big-beauty.jpg" loading="lazy" width="750" height="1000"
+                 alt="Big beauty, a large planter thrown from 15 pounds of brown clay, its glazes dark blue-black over brown, with a matching saucer and a ZZ plant"
+                 class="photo portrait">
+            <figcaption>big beauty: 15 pounds of brown clay thrown; various glazes</figcaption>
+        </figure>
+        <figure class="wide">
+            <img src="images/daisy-colander.jpg" loading="lazy" width="1000" height="750"
+                 alt="The daisy colander, nutmeg glaze on brown clay, with petal-shaped handles around the rim and holes in a flower pattern"
+                 class="photo">
+            <figcaption>daisy colander; nutmeg glaze on brown clay</figcaption>
+        </figure>
+        <figure class="pair">
+            <div class="pair-photos">
+                <img src="images/bowls-unglazed.jpg" loading="lazy" width="720" height="540"
+                     alt="The 4 bowls before glazing, bare brown clay, in a row on a studio shelf"
+                     class="photo landscape">
+                <img src="images/bowls-glazed.jpg" loading="lazy" width="750" height="1000"
+                     alt="The set of 4 bowls, white glaze on brown clay, stacked on a granite counter"
+                     class="photo portrait">
+            </div>
+            <figcaption>set of 4 bowls, white glaze on brown clay</figcaption>
+        </figure>
+    </main>
+    <footer>
+        <p>
+            I am not at the point of accepting commissions, but always love to talk:
+            <a href="mailto:james@unionpots.nyc">james@unionpots.nyc</a>.
+        </p>
+        <p>Set in <a href="https://productiontype.com/font/spectral">Spectral</a>, a typeface by <a href="https://productiontype.com/">Production Type</a>.</p>
+        <p>Union Pots &middot; Brooklyn, New York, United States of America.</p>
+    </footer>
 </body>
 </html>
