@@ -29,6 +29,7 @@ go test ./...
 | `SPACES_REGION` | e.g. `nyc3` |
 | `SPACES_BUCKET` | Bucket name. |
 | `SPACES_KEY`, `SPACES_SECRET` | Spaces access key. |
+| `LOG_BACKUP_PREFIX` | Folder inside the bucket for this deployment's objects, e.g. `prod` or `demo` (default: the bucket's top level). Lets several deployments share one bucket; each only sees, restores and prunes its own objects. |
 | `LOG_BACKUPS` | `off` to run without backups. Without this or the `SPACES_*` variables, the app refuses to start. |
 | `LOG_BACKUP_DIR` | Back up to a local directory instead of Spaces (testing). |
 | `LOG_MIN_PIECE_ID` | Lowest number given to a new piece automatically (default 1). Same as `serve -min-piece-id N`. Numbers already used are never reused, and backfill can still use lower ones. |
@@ -38,11 +39,11 @@ go test ./...
 ## Commands
 
 ```
-log serve            run the app; backs up hourly when the DB changed, and on shutdown
+log serve            run the app; backs up every 10 minutes when the DB changed, and on shutdown
 log backup           back up now (no-op if unchanged)
 log restore          restore newest snapshot + photos into LOG_DATA_DIR
   -at 2026-10-01     newest snapshot on or before a date
-  -key db/hourly/…   an exact snapshot
+  -key db/snapshots/…  an exact snapshot
 log hash-password    read a password, print its bcrypt hash
 ```
 
@@ -52,8 +53,7 @@ One-time setup:
 
 1. **Spaces**: create a bucket and an access key scoped to it (read, write
    and delete). Turn on versioning. No lifecycle rule is needed: the app
-   deletes hourly backups older than 7 days itself, always keeping the newest
-   one, and keeps `db/daily/` forever.
+   deletes backups older than 30 days itself, always keeping the newest one.
 2. **DNS**: an A record for `log.unionpots.nyc` pointing at the VM.
 3. **Password**: `go run ./cmd/log hash-password` (or
    `docker run --rm -it jamespfennell/log.unionpots.nyc hash-password`), and a

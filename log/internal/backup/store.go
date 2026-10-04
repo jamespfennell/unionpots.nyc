@@ -209,3 +209,43 @@ func writeFileAtomic(path string, data []byte) error {
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// Prefixed keeps every object under a prefix ("prod/db/…", "demo/photos/…")
+// so several deployments can share one bucket without seeing — or pruning —
+// each other's objects. An empty prefix means the bucket's top level.
+func Prefixed(store ObjectStore, prefix string) ObjectStore {
+	prefix = strings.Trim(prefix, "/")
+	if prefix == "" {
+		return store
+	}
+	return prefixStore{store, prefix + "/"}
+}
+
+type prefixStore struct {
+	inner  ObjectStore
+	prefix string
+}
+
+func (p prefixStore) Put(ctx context.Context, key string, body []byte) error {
+	return p.inner.Put(ctx, p.prefix+key, body)
+}
+
+func (p prefixStore) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	return p.inner.Get(ctx, p.prefix+key)
+}
+
+func (p prefixStore) Delete(ctx context.Context, key string) error {
+	return p.inner.Delete(ctx, p.prefix+key)
+}
+
+func (p prefixStore) List(ctx context.Context, prefix string) ([]string, error) {
+	keys, err := p.inner.List(ctx, p.prefix+prefix)
+	for i, k := range keys {
+		keys[i] = strings.TrimPrefix(k, p.prefix)
+	}
+	return keys, err
+}
+
+func (p prefixStore) String() string {
+	return p.inner.String() + "/" + strings.TrimSuffix(p.prefix, "/")
+}

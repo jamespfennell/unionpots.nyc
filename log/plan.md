@@ -13,7 +13,7 @@ document is the source of truth for decisions made so far.
 | Client | Responsive, mobile-first web app (installable PWA manifest, no offline mode). Studio connectivity is good, so it's online-only. |
 | Stack | Go (stdlib `net/http`, `html/template`) + htmx, SQLite, photos on local disk. |
 | Hosting | Existing DigitalOcean VM, Docker container, data on the VM disk, behind the existing Caddy. |
-| Backups | DigitalOcean Spaces (S3-compatible): in-app hourly DB snapshot (≤1h data loss accepted), mirrored photo objects. No Litestream. |
+| Backups | DigitalOcean Spaces (S3-compatible): in-app DB snapshot every 10 minutes when changed (≤10 min data loss), kept 30 days, always at least one; mirrored photo objects. No Litestream. |
 | Actions & states | History is dated actions (started, thrown, built, trimmed, queued for bisque, glazed, finished, broken). The current state is what the piece is waiting for: started → waiting to be trimmed → drying → waiting to be bisque fired → waiting to be glaze fired → finished / broken. |
 | Ratings | glaze / shape / overall, 1–5, only once a piece is finished. |
 | Metadata | Typed fields for the searchable things (form, clays, glazes, weight, 3-D dimensions, ratings) + free-form key/value + notes. Project-level values are inherited by pieces. |
@@ -327,7 +327,7 @@ log/
   internal/db/                connection, migrations/, queries
   internal/model/             actions & states, field registry, validation, inheritance
   internal/photos/            ingest, derivatives, storage, Spaces mirror
-  internal/backup/            hourly DB snapshot, upload, retention, restore
+  internal/backup/            DB snapshots, upload, retention, restore
   internal/web/               router, handlers, auth, templates, static (embedded)
     templates/*.html
     static/htmx.min.js        vendored, pinned
@@ -419,10 +419,10 @@ log/
 
 ## 6. Backup and restore
 
-Target: **lose at most ~1 hour of edits** in a disaster (VM/disk loss).
+Target: **lose at most ~10 minutes of edits** in a disaster (VM/disk loss).
 Deploys and restarts lose nothing, because a snapshot is taken on shutdown.
 
-**Database:** a goroutine in `internal/backup` runs hourly, plus once on
+**Database:** a goroutine in `internal/backup` runs every 10 minutes, plus once on
 graceful shutdown (SIGTERM):
 1. `VACUUM INTO '/data/backup-tmp.db'` produces a consistent, compacted copy.
    It runs as a read transaction, so the app keeps serving and writing
@@ -431,22 +431,25 @@ graceful shutdown (SIGTERM):
    loudly.
 3. **Skip if nothing changed:** compare the copy's SHA-256 with the last
    uploaded one. `VACUUM INTO` output is deterministic for unchanged data, so
-   most hours upload nothing.
-4. gzip and upload to `s3://<bucket>/db/hourly/2026-10-03T14-00Z.db.gz`. The
-   first snapshot each day is also copied to `db/daily/2026-10-03.db.gz`.
-5. Retention: after each run the app deletes `db/hourly/` snapshots older
-   than 7 days, but never the newest one, so even if backups stopped for a
-   long time there is always at least one hourly snapshot (a bucket
+   most runs upload nothing.
+4. gzip and upload to `s3://<bucket>/<prefix>/db/snapshots/2026-10-03T14-00-00Z.db.gz`.
+5. Retention: after each run the app deletes copies older than 30 days, but
+   **never the newest copy** (nor the newest regular one), so even if
+   backups stopped for months there is always at least one (a bucket
    lifecycle rule would delete by age alone). Deletion removes every stored
-   version, so bucket versioning doesn't keep expired snapshots around.
-   `db/daily/` is kept forever, since a few MB/day is negligible.
+   version, so bucket versioning doesn't keep expired copies around. Only
+   `db/snapshots/` and `db/pre-migration/` are recognised; anything else in
+   the bucket (e.g. older layouts from before launch) is ignored and can be
+   deleted by hand.
 6. Record the result (time, size, success/error) in memory for the
    banner. The last uploaded hash lives in `/data/backup-state.json`, not the DB,
    so recording a backup never itself counts as a change.
 
-If an upload fails, the next hourly run retries, since the stored hash hasn't
+If an upload fails, the next run retries, since the stored hash hasn't
 changed. A thin site-wide banner warns if no backup run has
-succeeded (uploaded, or confirmed nothing changed) in the last 3 hours.
+succeeded (uploaded, or confirmed nothing changed) in the last hour. The
+Backups page (menu) states this policy and shows how many copies are
+stored, the oldest and the newest.
 
 `log backup` runs the same thing on demand (e.g. before a risky migration).
 The app also takes a snapshot automatically before applying any new schema
@@ -470,6 +473,10 @@ unbacked-up by accident.
 human-readable, tool-independent archive of the life's work. Running it
 occasionally and keeping the zip on the desktop is the third copy.
 
+**Bucket prefix:** `LOG_BACKUP_PREFIX` (e.g. `prod`, `demo`) puts every
+object under a folder, so several deployments can share one bucket; each
+only lists, restores and prunes its own objects.
+
 **Restore** is documented step by step in `restore_playbook.md` (Compose
 on the VM): stop the service, move the data directory aside, run
 `log restore` (newest snapshot by default, or `-at`/`-key` for an older one,
@@ -477,8 +484,8 @@ integrity-checked, photos downloaded too), start it, spot-check. Run once as
 a drill.
 
 **Migrations:** before applying a schema migration the app uploads a snapshot
-to `db/pre-migration/<time>-v<old version>.db.gz`. These are kept forever and
-never chosen by a default restore (they have the old schema); restore one
+to `db/pre-migration/<time>-v<old version>.db.gz`. These follow the 30-day
+rule and are never chosen by a default restore (they have the old schema); restore one
 with `-key` if a migration goes wrong.
 
 ## 7. Public pages (v2)
@@ -518,6 +525,8 @@ simple. The rules (also at the top of `app.css`):
   up; rows highlight on hover. Home groups are separated by a hairline rule.
 - **Pills** (tap to toggle) for small choices: "Started by" and "Also apply
   to #130 #131".
+- The menu's last line shows the running build ("Version b8e67d8 · built
+  4 Oct 2026"), stamped in by CI; local builds use git's info or "dev".
 - Touch targets ≥ 44px; 640px max content width; no dark mode in v1.
 - One hand-written `app.css` with custom properties; static URLs are
   content-hashed so updates are picked up immediately.
@@ -549,7 +558,7 @@ backups running to Spaces, restore drill performed. Next: M2.
 - Go module, `serve` with login/logout, migrations, layout template + CSS
   tokens.
 - Dockerfile, CI job, deployed at log.unionpots.nyc.
-- Hourly DB backup + `log restore` working against Spaces, **restore drill
+- DB backups + `log restore` working against Spaces, **restore drill
   performed**.
 
 **M1 — Core workflow** ✓

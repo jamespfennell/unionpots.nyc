@@ -96,6 +96,10 @@ func loadConfig() (config, error) {
 		}
 		c.Store = backup.NewS3Store(s3)
 	}
+	if c.Store != nil {
+		// Several deployments (e.g. the log and a demo) can share a bucket.
+		c.Store = backup.Prefixed(c.Store, os.Getenv("LOG_BACKUP_PREFIX"))
+	}
 	return c, nil
 }
 
@@ -182,13 +186,15 @@ func serve(logger *slog.Logger, args []string) error {
 	}
 
 	status := func() backup.Status { return backup.Status{} }
+	var snapshots func(context.Context) ([]backup.Snapshot, error)
 	backupCtx, stopBackups := context.WithCancel(context.Background())
 	backupsDone := make(chan struct{})
 	if backuper != nil {
 		status = backuper.Status
+		snapshots = backuper.Snapshots
 		go func() {
 			defer close(backupsDone)
-			backuper.Run(backupCtx, time.Hour)
+			backuper.Run(backupCtx, backup.Interval)
 		}()
 	} else {
 		close(backupsDone)
@@ -202,7 +208,9 @@ func serve(logger *slog.Logger, args []string) error {
 			Now:          time.Now,
 		},
 		Backup:       status,
+		Snapshots:    snapshots,
 		LoginMessage: *loginMessage,
+		Version:      versionText(),
 		Now:          time.Now,
 		Log:          logger,
 	}
@@ -216,7 +224,7 @@ func serve(logger *slog.Logger, args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", c.Addr, "data", c.DataDir, "min_piece_id", *minID)
+		logger.Info("listening", "addr", c.Addr, "data", c.DataDir, "min_piece_id", *minID, "version", versionText())
 		errc <- httpServer.ListenAndServe()
 	}()
 
@@ -274,7 +282,7 @@ func backupNow(logger *slog.Logger) error {
 func restore(logger *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("restore", flag.ExitOnError)
 	at := fs.String("at", "", "restore the newest snapshot taken on or before this date (YYYY-MM-DD)")
-	key := fs.String("key", "", "restore this exact snapshot key, e.g. db/hourly/2026-10-03T14-00-00Z.db.gz")
+	key := fs.String("key", "", "restore this exact snapshot key, e.g. db/snapshots/2026-10-03T14-00-00Z.db.gz")
 	fs.Parse(args)
 	c, err := loadConfig()
 	if err != nil {

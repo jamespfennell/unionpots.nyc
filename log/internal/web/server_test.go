@@ -800,3 +800,29 @@ func TestLoginMessage(t *testing.T) {
 		t.Fatalf("login page should show the message")
 	}
 }
+
+func TestBackupsPageShowsPolicyAndStoredCopies(t *testing.T) {
+	a := newApp(t)
+	now := time.Date(2026, 10, 3, 15, 0, 0, 0, time.UTC)
+	srv := &Server{Store: a.store, Auth: &Auth{PasswordHash: nil, Secret: []byte(strings.Repeat("s", 32)), Now: func() time.Time { return now }},
+		Backup: func() backup.Status { return backup.Status{Enabled: true, Target: "s3://bucket/prod", LastOK: now} },
+		Snapshots: func(context.Context) ([]backup.Snapshot, error) {
+			return []backup.Snapshot{
+				{Key: "db/snapshots/a", At: now.AddDate(0, 0, -29)},
+				{Key: "db/snapshots/b", At: now.Add(-10 * time.Minute)},
+			}, nil
+		},
+		Now: func() time.Time { return now }, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	h := srv.Handler()
+	cookie, _ := srv.Auth.newSession()
+	req := httptest.NewRequest("GET", "/backups", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookie})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, want := range []string{"every 10 minutes", "kept for 30 days", "never deleted", "<dd>2</dd>", "10 min ago", "29 days ago", "s3://bucket/prod"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("backups page should contain %q", want)
+		}
+	}
+}

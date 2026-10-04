@@ -33,6 +33,7 @@
         <hr>
         <a href="/backups">Backups</a>
         <form method="post" action="/logout" hx-boost="false"><button type="submit">Log out</button></form>
+        {{with .Version}}<p class="menu-version">Version {{.}}</p>{{end}}
       </nav>
     </details>
   </header>

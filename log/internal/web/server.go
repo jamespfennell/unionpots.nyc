@@ -3,6 +3,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -34,11 +35,16 @@ type Server struct {
 	Store  *db.Store
 	Auth   *Auth
 	Backup func() backup.Status
+	// Snapshots lists the stored backups (nil when backups are off).
+	Snapshots func(context.Context) ([]backup.Snapshot, error)
 	// LoginMessage, if set, is shown on the login page (e.g. the password of
 	// a local preview). Never set it in production.
 	LoginMessage string
-	Now          func() time.Time
-	Log          *slog.Logger
+	// Version describes the running build ("b8e67d8 · built 4 Oct 2026"),
+	// shown at the bottom of the menu.
+	Version string
+	Now     func() time.Time
+	Log     *slog.Logger
 
 	pages map[string]*template.Template
 }
@@ -279,13 +285,14 @@ func mustParsePages() map[string]*template.Template {
 // Page is the data common to every page; handlers embed it.
 type Page struct {
 	Title    string
+	Version  string
 	LoggedIn bool
 	Today    string
 	Banner   string
 }
 
 func (s *Server) page(r *http.Request, title string) Page {
-	p := Page{Title: title, LoggedIn: s.Auth.valid(r), Today: model.Today(s.Now())}
+	p := Page{Title: title, Version: s.Version, LoggedIn: s.Auth.valid(r), Today: model.Today(s.Now())}
 	if p.LoggedIn {
 		st := s.Backup()
 		switch {
@@ -421,13 +428,28 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
 	return redirect(w, r, safeNext(r.FormValue("next")))
 }
 
-// backups shows the state of the database backups.
+// backups shows the backup policy, what's stored and how the last runs went.
 func (s *Server) backups(w http.ResponseWriter, r *http.Request) error {
 	data := struct {
 		Page
-		Status backup.Status
-		Now    time.Time
-	}{s.page(r, "Backups"), s.Backup(), s.Now()}
+		Status          backup.Status
+		Now             time.Time
+		IntervalMinutes int
+		RetentionDays   int
+		Count           int
+		Oldest, Newest  time.Time
+		ListError       string
+	}{Page: s.page(r, "Backups"), Status: s.Backup(), Now: s.Now(),
+		IntervalMinutes: int(backup.Interval.Minutes()), RetentionDays: int(backup.Retention.Hours() / 24)}
+	if s.Snapshots != nil {
+		snaps, err := s.Snapshots(r.Context())
+		if err != nil {
+			s.Log.Error("listing backups", "err", err)
+			data.ListError = "Couldn’t list the stored backups right now."
+		} else if len(snaps) > 0 {
+			data.Count, data.Oldest, data.Newest = len(snaps), snaps[0].At, snaps[len(snaps)-1].At
+		}
+	}
 	return s.render(w, http.StatusOK, "backups", data)
 }
 

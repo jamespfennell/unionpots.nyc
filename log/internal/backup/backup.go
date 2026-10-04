@@ -1,4 +1,4 @@
-// Package backup snapshots the SQLite database to object storage hourly and
+// Package backup snapshots the SQLite database to object storage every few minutes and
 // restores it. Photos are mirrored separately as they are uploaded; Restore
 // downloads both.
 package backup
@@ -18,23 +18,27 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+)
 
-	"unionpots.nyc/log/internal/model"
+// Backup policy: every Interval the database is copied if it has changed
+// (and once more when the app stops). Copies older than Retention are
+// deleted, but the newest copy is never deleted, so there is always at least
+// one backup however long backups have been stopped.
+const (
+	Interval  = 10 * time.Minute
+	Retention = 30 * 24 * time.Hour
 )
 
 const (
-	hourlyPrefix       = "db/hourly/"
-	dailyPrefix        = "db/daily/"
-	preMigrationPrefix = "db/pre-migration/" // kept forever; restored only by -key
+	snapshotPrefix     = "db/snapshots/"
+	preMigrationPrefix = "db/pre-migration/" // restored only by -key (older schema)
 	PhotoPrefix        = "photos/"
 
-	// Hourly snapshots older than this are deleted, except the newest one, so
-	// there is always at least one hourly snapshot. Daily ones are kept forever.
-	hourlyRetention = 7 * 24 * time.Hour
-	hourlyLayout    = "2006-01-02T15-04-05Z"
+	keyLayout = "2006-01-02T15-04-05Z"
 
 	stateFile = "backup-state.json"
 	tmpFile   = "backup-tmp.db"
@@ -54,14 +58,13 @@ type Status struct {
 
 // Stale reports whether backups haven't succeeded recently.
 func (s Status) Stale(now time.Time) bool {
-	return s.Enabled && now.Sub(s.LastOK) > 3*time.Hour
+	return s.Enabled && now.Sub(s.LastOK) > time.Hour
 }
 
 type state struct {
 	SHA256     string    `json:"sha256"`
 	Key        string    `json:"key"`
 	UploadedAt time.Time `json:"uploaded_at"`
-	LastDaily  string    `json:"last_daily"`
 }
 
 type Backuper struct {
@@ -101,7 +104,7 @@ func (b *Backuper) Run(ctx context.Context, interval time.Duration) {
 }
 
 // RunOnce snapshots the database and uploads it unless it is unchanged since
-// the last upload (or force is set), then prunes expired hourly snapshots. It
+// the last upload (or force is set), then prunes expired snapshots. It
 // reports whether it uploaded. A pruning failure is logged, not returned: the
 // backup itself still succeeded.
 func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err error) {
@@ -140,15 +143,9 @@ func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err 
 		return false, err
 	}
 	now := b.Now().UTC()
-	key := hourlyPrefix + now.Format(hourlyLayout) + ".db.gz"
+	key := snapshotPrefix + now.Format(keyLayout) + ".db.gz"
 	if err := b.Store.Put(ctx, key, gz); err != nil {
 		return false, err
-	}
-	if today := model.Today(now); st.LastDaily != today {
-		if err := b.Store.Put(ctx, dailyPrefix+today+".db.gz", gz); err != nil {
-			return false, err
-		}
-		st.LastDaily = today
 	}
 	st.SHA256, st.Key, st.UploadedAt = hash, key, now
 	if err := b.saveState(st); err != nil {
@@ -161,8 +158,8 @@ func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err 
 
 // BackupBeforeMigration uploads a snapshot of the database as it is before a
 // schema migration from version from. It goes under its own prefix, so a
-// regular backup taken in the same second can't overwrite it, and is kept
-// forever. It doesn't touch the change-detection state.
+// regular backup taken in the same second can't overwrite it. It doesn't
+// touch the change-detection state.
 func (b *Backuper) BackupBeforeMigration(ctx context.Context, from int) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -174,7 +171,7 @@ func (b *Backuper) BackupBeforeMigration(ctx context.Context, from int) error {
 	if err != nil {
 		return err
 	}
-	key := fmt.Sprintf("%s%s-v%d.db.gz", preMigrationPrefix, b.Now().UTC().Format(hourlyLayout), from)
+	key := fmt.Sprintf("%s%s-v%d.db.gz", preMigrationPrefix, b.Now().UTC().Format(keyLayout), from)
 	if err := b.Store.Put(ctx, key, gz); err != nil {
 		return err
 	}
@@ -182,42 +179,81 @@ func (b *Backuper) BackupBeforeMigration(ctx context.Context, from int) error {
 	return nil
 }
 
-// prune deletes hourly snapshots older than hourlyRetention, always keeping
-// the newest one. Keys it can't parse are left alone.
-func (b *Backuper) prune(ctx context.Context) error {
-	keys, err := b.Store.List(ctx, hourlyPrefix)
+// Snapshot is a stored copy of the database.
+type Snapshot struct {
+	Key          string
+	At           time.Time
+	PreMigration bool // taken before a schema migration (older schema)
+}
+
+// parseSnapshot reads a database copy's key: db/snapshots/<time>.db.gz or
+// db/pre-migration/<time>-v<version>.db.gz. Anything else isn't a backup.
+func parseSnapshot(key string) (Snapshot, bool) {
+	pre := strings.HasPrefix(key, preMigrationPrefix)
+	if !pre && !strings.HasPrefix(key, snapshotPrefix) || !strings.HasSuffix(key, ".db.gz") {
+		return Snapshot{}, false
+	}
+	name := strings.TrimSuffix(path.Base(key), ".db.gz")
+	if pre {
+		i := strings.LastIndex(name, "-v")
+		if i < 0 {
+			return Snapshot{}, false
+		}
+		name = name[:i]
+	}
+	at, err := time.Parse(keyLayout, name)
 	if err != nil {
+		return Snapshot{}, false
+	}
+	return Snapshot{key, at, pre}, true
+}
+
+// listSnapshots returns the stored database copies, oldest first. Objects it
+// can't recognise are left out (and so never pruned).
+func listSnapshots(ctx context.Context, store ObjectStore) ([]Snapshot, error) {
+	keys, err := store.List(ctx, "db/")
+	if err != nil {
+		return nil, err
+	}
+	var snaps []Snapshot
+	for _, k := range keys {
+		if sn, ok := parseSnapshot(k); ok {
+			snaps = append(snaps, sn)
+		}
+	}
+	sort.SliceStable(snaps, func(i, j int) bool { return snaps[i].At.Before(snaps[j].At) })
+	return snaps, nil
+}
+
+// Snapshots lists the stored database copies, oldest first (for the
+// backups page).
+func (b *Backuper) Snapshots(ctx context.Context) ([]Snapshot, error) {
+	return listSnapshots(ctx, b.Store)
+}
+
+// prune deletes copies older than Retention, but never the newest regular
+// copy nor the newest copy of any kind: there is always at least one backup.
+func (b *Backuper) prune(ctx context.Context) error {
+	snaps, err := listSnapshots(ctx, b.Store)
+	if err != nil || len(snaps) == 0 {
 		return err
 	}
-	type snap struct {
-		key string
-		at  time.Time
-	}
-	var snaps []snap
-	for _, k := range keys {
-		ts := strings.TrimSuffix(strings.TrimPrefix(k, hourlyPrefix), ".db.gz")
-		if at, err := time.Parse(hourlyLayout, ts); err == nil {
-			snaps = append(snaps, snap{k, at})
+	keep := map[string]bool{snaps[len(snaps)-1].Key: true}
+	for i := len(snaps) - 1; i >= 0; i-- {
+		if !snaps[i].PreMigration {
+			keep[snaps[i].Key] = true
+			break
 		}
 	}
-	if len(snaps) <= 1 {
-		return nil
-	}
-	newest := snaps[0]
-	for _, s := range snaps[1:] {
-		if s.at.After(newest.at) {
-			newest = s
-		}
-	}
-	cutoff := b.Now().Add(-hourlyRetention)
-	for _, s := range snaps {
-		if s.key == newest.key || !s.at.Before(cutoff) {
+	cutoff := b.Now().Add(-Retention)
+	for _, sn := range snaps {
+		if keep[sn.Key] || !sn.At.Before(cutoff) {
 			continue
 		}
-		if err := b.Store.Delete(ctx, s.key); err != nil {
+		if err := b.Store.Delete(ctx, sn.Key); err != nil {
 			return err
 		}
-		b.Log.Info("deleted expired backup", "key", s.key)
+		b.Log.Info("deleted expired backup", "key", sn.Key)
 	}
 	return nil
 }
@@ -343,22 +379,19 @@ func chooseSnapshot(ctx context.Context, store ObjectStore, opts RestoreOptions)
 	if opts.Key != "" {
 		return opts.Key, nil
 	}
-	keys, err := store.List(ctx, "db/")
+	snaps, err := listSnapshots(ctx, store)
 	if err != nil {
 		return "", err
 	}
-	best, bestTS := "", ""
-	for _, k := range keys {
-		if strings.HasPrefix(k, preMigrationPrefix) {
-			continue // old schema; only restored when asked for by key
+	best := ""
+	for _, sn := range snaps { // oldest first, so the last match wins
+		if sn.PreMigration {
+			continue // older schema; only restored when asked for by key
 		}
-		ts := strings.TrimSuffix(path.Base(k), ".db.gz")
-		if opts.At != "" && ts[:min(len(ts), 10)] > opts.At {
+		if opts.At != "" && sn.At.Format("2006-01-02") > opts.At {
 			continue
 		}
-		if ts > bestTS {
-			best, bestTS = k, ts
-		}
+		best = sn.Key
 	}
 	if best == "" {
 		return "", errors.New("no matching database snapshot found")

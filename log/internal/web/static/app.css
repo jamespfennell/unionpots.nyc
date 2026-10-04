@@ -111,6 +111,7 @@ a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset:
 .menu-panel a:hover, .menu-panel button:hover { background: var(--hover); }
 .menu-panel form { margin: 0; }
 .menu-panel hr { border: 0; border-top: 1px solid var(--line); margin: 0.4rem 0; }
+.menu-version { margin: 0.4rem 0 0; padding: 0.5rem 1rem 0.3rem; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--muted); }
 .home-new { margin: 0 0 1.5rem; }
 /* Filled a touch darker than the hover colour: noticeable, not loud. */
 .home-new .button { background: #ebe5dc; border-color: #ebe5dc; font-weight: 500; }

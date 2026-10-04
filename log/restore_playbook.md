@@ -13,7 +13,7 @@ The compose service is `log.unionpots.nyc` and its data lives in `./data`.
 ```sh
 ./restore.sh                      # newest snapshot
 ./restore.sh -at 2026-10-01       # newest snapshot on or before a date
-./restore.sh -key db/hourly/2026-10-03T14-00-00Z.db.gz
+./restore.sh -key db/snapshots/2026-10-03T14-00-00Z.db.gz
 ```
 
 [`restore.sh`](restore.sh) asks for confirmation, then does the steps below.
@@ -28,12 +28,14 @@ so the newest snapshot is still the last good one.
 
 **To go back in time** (e.g. to undo a mistake), pass `-at` or `-key`.
 `-at` with *today's* date also matches the backup just made, so to rewind to
-earlier today use `-key`. To list the snapshots (hourly for the last 7 days,
-plus one per day forever):
+earlier today use `-key`. The Backups page (menu) shows how many copies are
+stored and the oldest and newest; copies are taken every 10 minutes when
+something changed and kept for 30 days (the newest is never deleted). To
+list them:
 
 ```sh
 aws s3 ls --endpoint-url https://nyc3.digitaloceanspaces.com \
-  s3://unionpots-log/db/ --recursive
+  s3://unionpots-log/db/ --recursive        # with LOG_BACKUP_PREFIX=prod: s3://unionpots-log/prod/db/
 ```
 
 ## What the script does

@@ -4,7 +4,7 @@
 # Run from the directory containing the compose file.
 #   ./restore.sh                      newest snapshot
 #   ./restore.sh -at 2026-10-01       newest snapshot on or before a date
-#   ./restore.sh -key db/hourly/2026-10-03T14-00-00Z.db.gz
+#   ./restore.sh -key db/snapshots/2026-10-03T14-00-00Z.db.gz
 set -euo pipefail
 
 SERVICE=log.unionpots.nyc

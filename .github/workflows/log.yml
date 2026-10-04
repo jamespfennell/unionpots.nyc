@@ -31,10 +31,16 @@ jobs:
           username: jamespfennell
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Record the build time
+        run: echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Build the Docker image and push to Docker Hub
         uses: docker/build-push-action@v6
         with:
           context: log
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
           tags: jamespfennell/log.unionpots.nyc:latest
           # Only push to Docker Hub if this workflow is a push to main
           push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
