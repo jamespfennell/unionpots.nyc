@@ -24,6 +24,9 @@ type ObjectStore interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	// List returns all keys with the prefix, sorted.
 	List(ctx context.Context, prefix string) ([]string, error)
+	// Delete removes an object permanently. On a versioned bucket that means
+	// every stored version, not just hiding it behind a delete marker.
+	Delete(ctx context.Context, key string) error
 	String() string
 }
 
@@ -68,6 +71,14 @@ func (d DirStore) List(_ context.Context, prefix string) ([]string, error) {
 	})
 	sort.Strings(keys)
 	return keys, err
+}
+
+func (d DirStore) Delete(_ context.Context, key string) error {
+	err := os.Remove(d.path(key))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func (d DirStore) String() string { return "dir:" + d.Root }
@@ -137,6 +148,44 @@ func (s *S3Store) List(ctx context.Context, prefix string) ([]string, error) {
 	}
 	sort.Strings(keys)
 	return keys, nil
+}
+
+func (s *S3Store) Delete(ctx context.Context, key string) error {
+	var versions []*string
+	p := s3.NewListObjectVersionsPaginator(s.client, &s3.ListObjectVersionsInput{
+		Bucket: aws.String(s.bucket),
+		Prefix: aws.String(key),
+	})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("list versions of %s: %w", key, err)
+		}
+		for _, v := range page.Versions {
+			if aws.ToString(v.Key) == key {
+				versions = append(versions, v.VersionId)
+			}
+		}
+		for _, m := range page.DeleteMarkers {
+			if aws.ToString(m.Key) == key {
+				versions = append(versions, m.VersionId)
+			}
+		}
+	}
+	if len(versions) == 0 {
+		versions = []*string{nil} // unversioned bucket: a plain delete
+	}
+	for _, v := range versions {
+		_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket:    aws.String(s.bucket),
+			Key:       aws.String(key),
+			VersionId: v,
+		})
+		if err != nil {
+			return fmt.Errorf("delete %s: %w", key, err)
+		}
+	}
+	return nil
 }
 
 func (s *S3Store) String() string { return "s3://" + s.bucket }

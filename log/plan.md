@@ -414,7 +414,11 @@ graceful shutdown (SIGTERM):
    most hours upload nothing.
 4. gzip and upload to `s3://<bucket>/db/hourly/2026-10-03T14-00Z.db.gz`. The
    first snapshot each day is also copied to `db/daily/2026-10-03.db.gz`.
-5. Retention: a Spaces lifecycle rule expires `db/hourly/` after 7 days.
+5. Retention: after each run the app deletes `db/hourly/` snapshots older
+   than 7 days, but never the newest one, so even if backups stopped for a
+   long time there is always at least one hourly snapshot (a bucket
+   lifecycle rule would delete by age alone). Deletion removes every stored
+   version, so bucket versioning doesn't keep expired snapshots around.
    `db/daily/` is kept forever, since a few MB/day is negligible.
 6. Record the result (time, size, success/error) in memory for the
    banner. The last uploaded hash lives in `/data/backup-state.json`, not the DB,

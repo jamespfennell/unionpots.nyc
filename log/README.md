@@ -48,9 +48,10 @@ log hash-password    read a password, print its bcrypt hash
 
 One-time setup:
 
-1. **Spaces**: create a bucket and an access key scoped to it. Turn on
-   versioning. Add a lifecycle rule expiring the `db/hourly/` prefix after
-   7 days (`db/daily/` is kept forever).
+1. **Spaces**: create a bucket and an access key scoped to it (read, write
+   and delete). Turn on versioning. No lifecycle rule is needed: the app
+   deletes hourly backups older than 7 days itself, always keeping the newest
+   one, and keeps `db/daily/` forever.
 2. **DNS**: an A record for `log.unionpots.nyc` pointing at the VM.
 3. **Env file** `/srv/log.unionpots.nyc.env` (mode 600) with the variables above.
 4. **Caddy**: add to the front Caddyfile and reload:

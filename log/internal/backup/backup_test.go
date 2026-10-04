@@ -132,3 +132,49 @@ func TestChooseSnapshot(t *testing.T) {
 		t.Errorf("expected error when nothing matches")
 	}
 }
+
+func TestPruneKeepsRecentAndNewest(t *testing.T) {
+	b, _, store := setup(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	for _, k := range []string{
+		"db/hourly/2026-10-01T10-00-00Z.db.gz", // expired
+		"db/hourly/2026-10-12T10-00-00Z.db.gz", // expired (8 days)
+		"db/hourly/2026-10-14T10-00-00Z.db.gz", // kept (6 days)
+		"db/hourly/notes.txt",                  // unparseable: left alone
+		"db/daily/2026-10-01.db.gz",            // daily: kept forever
+	} {
+		store.Put(ctx, k, []byte("x"))
+	}
+	if err := b.prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.List(ctx, "db/")
+	want := []string{"db/daily/2026-10-01.db.gz", "db/hourly/2026-10-14T10-00-00Z.db.gz", "db/hourly/notes.txt"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("after prune: %v\nwant %v", got, want)
+	}
+
+	// If backups stopped long ago, the newest hourly snapshot survives.
+	now = now.AddDate(0, 3, 0)
+	if err := b.prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.List(ctx, hourlyPrefix); len(got) != 2 || got[0] != "db/hourly/2026-10-14T10-00-00Z.db.gz" {
+		t.Fatalf("newest hourly snapshot should be kept: %v", got)
+	}
+}
+
+func TestRunOncePrunes(t *testing.T) {
+	b, _, store := setup(t)
+	ctx := context.Background()
+	store.Put(ctx, "db/hourly/2020-01-01T00-00-00Z.db.gz", []byte("old"))
+	if _, err := b.RunOnce(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	keys, _ := store.List(ctx, hourlyPrefix)
+	if len(keys) != 1 || strings.HasPrefix(keys[0], "db/hourly/2020") {
+		t.Fatalf("old snapshot should be pruned after a run: %v", keys)
+	}
+}

@@ -30,6 +30,11 @@ const (
 	dailyPrefix  = "db/daily/"
 	PhotoPrefix  = "photos/"
 
+	// Hourly snapshots older than this are deleted, except the newest one, so
+	// there is always at least one hourly snapshot. Daily ones are kept forever.
+	hourlyRetention = 7 * 24 * time.Hour
+	hourlyLayout    = "2006-01-02T15-04-05Z"
+
 	stateFile = "backup-state.json"
 	tmpFile   = "backup-tmp.db"
 )
@@ -95,10 +100,19 @@ func (b *Backuper) Run(ctx context.Context, interval time.Duration) {
 }
 
 // RunOnce snapshots the database and uploads it unless it is unchanged since
-// the last upload (or force is set). It reports whether it uploaded.
+// the last upload (or force is set), then prunes expired hourly snapshots. It
+// reports whether it uploaded. A pruning failure is logged, not returned: the
+// backup itself still succeeded.
 func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	defer func() {
+		if err == nil {
+			if perr := b.prune(ctx); perr != nil {
+				b.Log.Error("pruning old backups failed", "err", perr)
+			}
+		}
+	}()
 	defer func() {
 		if err != nil {
 			b.status.LastError = err.Error()
@@ -125,7 +139,7 @@ func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err 
 		return false, err
 	}
 	now := b.Now().UTC()
-	key := hourlyPrefix + now.Format("2006-01-02T15-04-05Z") + ".db.gz"
+	key := hourlyPrefix + now.Format(hourlyLayout) + ".db.gz"
 	if err := b.Store.Put(ctx, key, gz); err != nil {
 		return false, err
 	}
@@ -142,6 +156,46 @@ func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err 
 	b.status.LastUpload, b.status.LastKey, b.status.LastSize = now, key, len(gz)
 	b.Log.Info("backup uploaded", "key", key, "bytes", len(gz))
 	return true, nil
+}
+
+// prune deletes hourly snapshots older than hourlyRetention, always keeping
+// the newest one. Keys it can't parse are left alone.
+func (b *Backuper) prune(ctx context.Context) error {
+	keys, err := b.Store.List(ctx, hourlyPrefix)
+	if err != nil {
+		return err
+	}
+	type snap struct {
+		key string
+		at  time.Time
+	}
+	var snaps []snap
+	for _, k := range keys {
+		ts := strings.TrimSuffix(strings.TrimPrefix(k, hourlyPrefix), ".db.gz")
+		if at, err := time.Parse(hourlyLayout, ts); err == nil {
+			snaps = append(snaps, snap{k, at})
+		}
+	}
+	if len(snaps) <= 1 {
+		return nil
+	}
+	newest := snaps[0]
+	for _, s := range snaps[1:] {
+		if s.at.After(newest.at) {
+			newest = s
+		}
+	}
+	cutoff := b.Now().Add(-hourlyRetention)
+	for _, s := range snaps {
+		if s.key == newest.key || !s.at.Before(cutoff) {
+			continue
+		}
+		if err := b.Store.Delete(ctx, s.key); err != nil {
+			return err
+		}
+		b.Log.Info("deleted expired backup", "key", s.key)
+	}
+	return nil
 }
 
 // snapshot returns a consistent, integrity-checked copy of the database.
