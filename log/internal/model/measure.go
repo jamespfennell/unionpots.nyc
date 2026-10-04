@@ -8,7 +8,7 @@ import (
 )
 
 // Dims are a piece's height, width and depth in inches. Zero means not
-// measured. For round forms width and depth are both the diameter.
+// measured.
 type Dims struct {
 	H float64 `json:"h,omitempty"`
 	W float64 `json:"w,omitempty"`
@@ -16,9 +16,6 @@ type Dims struct {
 }
 
 func (d Dims) Empty() bool { return d.H == 0 && d.W == 0 && d.D == 0 }
-
-// Round reports whether width and depth are the same (e.g. a bowl).
-func (d Dims) Round() bool { return d.W != 0 && d.W == d.D }
 
 // MeasuredAt are the actions at which a piece can be measured.
 var MeasuredAt = []Action{Thrown, Built, QueuedBisque, Finished}

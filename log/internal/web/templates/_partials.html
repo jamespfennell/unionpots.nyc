@@ -26,17 +26,14 @@
 {{/* Height / width / depth inputs (inches), one row per dimsRow. */}}
 {{define "dims"}}
 <div class="dims">
-  <div class="dims-head" aria-hidden="true"><span>Height</span><span>Width</span><span>Depth</span><span></span></div>
+  <div class="dims-head" aria-hidden="true"><span>Height</span><span>Width</span><span>Depth</span></div>
   {{range .}}
   <div class="dims-row">
     {{with .Label}}<div class="dims-label">{{.}}</div>{{end}}
     <div class="dims-inputs">
       <input name="h_{{.Key}}" value="{{measure .Dims.H}}" inputmode="decimal" autocomplete="off" aria-label="{{.Label}} height">
       <input name="w_{{.Key}}" value="{{measure .Dims.W}}" inputmode="decimal" autocomplete="off" aria-label="{{.Label}} width">
-      <input name="d_{{.Key}}" value="{{measure .Dims.D}}" inputmode="decimal" autocomplete="off" aria-label="{{.Label}} depth" data-depth>
-      <label class="pill pill-small" title="Round: depth is the same as width">
-        <input type="checkbox" name="round_{{.Key}}" value="1" class="visually-hidden" data-round{{if .Dims.Round}} checked{{end}}><span>Round</span>
-      </label>
+      <input name="d_{{.Key}}" value="{{measure .Dims.D}}" inputmode="decimal" autocomplete="off" aria-label="{{.Label}} depth">
     </div>
   </div>
   {{end}}
@@ -44,40 +41,51 @@
 </div>
 {{end}}
 
-{{/* Clay body pills (several can be chosen). Args: Clays, Selected (IDs),
-     AllowNew (adds an "or new" box that creates a clay body on submit). */}}
+{{/* Clay body pills (several can be chosen). The label links to the clay
+     list, where clay bodies are added and edited. Args: Clays, Selected. */}}
 {{define "clayPills"}}
 <fieldset class="pills">
-  <legend>Clay <a class="legend-link" href="/clays">edit clays</a></legend>
+  <legend>Clay <span class="legend-link">(<a href="/clays">manage clays</a>)</span></legend>
   <div class="pill-row">
     {{range .Clays}}
     <label class="pill"><input type="checkbox" name="clay" value="{{.ID}}" class="visually-hidden"{{if hasID $.Selected .ID}} checked{{end}}><span>{{.Name}}</span></label>
-    {{end}}
-    {{if .AllowNew}}
-    <label class="pill-custom">
-      {{if .Clays}}<span class="muted">or</span>{{end}}
-      <input name="new_clay" autocomplete="off" placeholder="new clay" aria-label="New clay body">
-    </label>
-    {{else if not .Clays}}
-    <span class="muted">No clay bodies yet.</span>
     {{end}}
   </div>
 </fieldset>
 {{end}}
 
-{{/* Glaze boxes: one per glaze, plus an empty one to add another (app.js
-     adds a fresh box as the last one is filled). Names already used are
-     suggested. Args: Glazes, Notes, Names. */}}
+{{/* Glazes as free text ("Pink with dabs of Red"). Known glazes in it are
+     recognised (shown live underneath) and suggested while typing; a new
+     glaze is added inline with "(add a glaze)". Args: Text, Names. */}}
 {{define "glazeInputs"}}
-<fieldset class="pills glazes">
-  <legend>Glazes, in the order applied</legend>
-  <div class="stack glaze-list" data-glaze-list>
-    {{range .Glazes}}<input name="glaze" value="{{.}}" list="glaze-names" autocomplete="off" aria-label="Glaze">{{end}}
-    <input name="glaze" list="glaze-names" autocomplete="off" placeholder="{{if .Glazes}}another glaze{{else}}e.g. Celadon{{end}}" aria-label="Glaze">
-  </div>
-  <datalist id="glaze-names">{{range .Names}}<option value="{{.}}">{{end}}</datalist>
-</fieldset>
-<label class="field">How applied (optional)
-  <input name="glaze_notes" value="{{.Notes}}" autocomplete="off" placeholder="e.g. dipped 3 s, rim wiped">
-</label>
+<div class="glaze-entry" data-glaze-entry data-glaze-names="{{json .Names}}">
+  <label class="field">
+    <span>Glazes <span class="legend-link">(<a href="/glazes">manage glazes</a>)</span></span>
+    <textarea name="glaze_text" rows="2" autocomplete="off" placeholder="e.g. Pink with dabs of Red" data-glaze-text>{{.Text}}</textarea>
+  </label>
+  <div class="pill-row glaze-suggest" data-glaze-suggest hidden></div>
+  <p class="glaze-preview" data-glaze-preview></p>
+  <button type="button" class="link-button" data-glaze-add-open>(add a glaze)</button>
+  <span class="pill-new" data-glaze-add hidden>
+    <input autocomplete="off" placeholder="Glaze name" aria-label="New glaze name">
+    <button type="button" class="button" data-glaze-add-save>Add</button>
+  </span>
+</div>
+{{end}}
+
+{{/* Pieces in the same project and state that an action can also apply to.
+     Tapping a number toggles it. */}}
+{{define "alsoPieces"}}
+{{with .Siblings}}
+<div class="also">
+  <fieldset class="pills">
+    <legend>Also apply to other pieces in the project:</legend>
+    <div class="pill-row">
+      {{range .}}
+      <label class="pill"><input type="checkbox" name="also" value="{{.ID}}" class="visually-hidden"><span>#{{.ID}}</span></label>
+      {{end}}
+    </div>
+  </fieldset>
+</div>
+{{end}}
 {{end}}

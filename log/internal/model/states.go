@@ -16,6 +16,7 @@ import (
 type Action string
 
 const (
+	Started      Action = "started" // added before throwing, or building over several sessions
 	Thrown       Action = "thrown"
 	Built        Action = "built"
 	Trimmed      Action = "trimmed"
@@ -26,10 +27,10 @@ const (
 )
 
 // Actions in display order.
-var Actions = []Action{Thrown, Built, Trimmed, QueuedBisque, Glazed, Finished, Broken}
+var Actions = []Action{Started, Thrown, Built, Trimmed, QueuedBisque, Glazed, Finished, Broken}
 
 // StartActions are how a new piece begins (outside backfill mode).
-var StartActions = []Action{Thrown, Built}
+var StartActions = []Action{Started, Thrown, Built}
 
 func ParseAction(s string) (Action, error) {
 	for _, a := range Actions {
@@ -42,6 +43,8 @@ func ParseAction(s string) (Action, error) {
 
 func (a Action) Label() string {
 	switch a {
+	case Started:
+		return "Started"
 	case Thrown:
 		return "Thrown"
 	case Built:
@@ -63,6 +66,8 @@ func (a Action) Label() string {
 // Result is the state a piece is in after this action.
 func (a Action) Result() State {
 	switch a {
+	case Started:
+		return StateStarted
 	case Thrown:
 		return PendingTrimming
 	case Built, Trimmed:
@@ -83,6 +88,7 @@ func (a Action) Result() State {
 type State string
 
 const (
+	StateStarted    State = "started"
 	PendingTrimming State = "pending_trimming"
 	Drying          State = "drying"
 	PendingBisque   State = "pending_bisque"
@@ -92,10 +98,10 @@ const (
 )
 
 // States in display order.
-var States = []State{PendingTrimming, Drying, PendingBisque, PendingGlaze, StateFinished, StateBroken}
+var States = []State{StateStarted, PendingTrimming, Drying, PendingBisque, PendingGlaze, StateFinished, StateBroken}
 
 // InProgress are the states shown as sections on the home page.
-var InProgress = []State{PendingTrimming, Drying, PendingBisque, PendingGlaze}
+var InProgress = []State{StateStarted, PendingTrimming, Drying, PendingBisque, PendingGlaze}
 
 func ParseState(s string) (State, error) {
 	for _, st := range States {
@@ -108,6 +114,8 @@ func ParseState(s string) (State, error) {
 
 func (s State) Label() string {
 	switch s {
+	case StateStarted:
+		return "Started"
 	case PendingTrimming:
 		return "Waiting to be trimmed"
 	case Drying:
@@ -125,9 +133,12 @@ func (s State) Label() string {
 }
 
 // Next is the action that usually moves a piece on from this state, or ""
-// once it has ended.
+// once it has ended. For a started piece it's the more common of its two
+// ways on (see NextOptions).
 func (s State) Next() Action {
 	switch s {
+	case StateStarted:
+		return Thrown
 	case PendingTrimming:
 		return Trimmed
 	case Drying:
@@ -138,6 +149,18 @@ func (s State) Next() Action {
 		return Finished
 	}
 	return ""
+}
+
+// NextOptions are the ways a piece can usually move on from this state:
+// thrown or built for a started piece, otherwise just Next.
+func (s State) NextOptions() []Action {
+	if s == StateStarted {
+		return []Action{Thrown, Built}
+	}
+	if n := s.Next(); n != "" {
+		return []Action{n}
+	}
+	return nil
 }
 
 // Ended reports whether the piece is finished or broken.

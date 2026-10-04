@@ -3,6 +3,7 @@
   <h1>Union Pots · Log</h1>
   <form method="post" action="/login" class="stack" hx-boost="false">
     <input type="hidden" name="next" value="{{.Next}}">
+    {{with .Message}}<p class="login-message">{{.}}</p>{{end}}
     <label class="field">Password
       <input type="password" name="password" autocomplete="current-password" autofocus required>
     </label>

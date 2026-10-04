@@ -6,51 +6,29 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"unionpots.nyc/log/internal/model"
 )
 
-// Free-text piece details, stored as piece metadata. These are deliberately
-// not records of their own (unlike clay bodies).
+// Free-text piece details, stored as piece metadata.
 const (
-	formKey       = "form"        // JSON string, e.g. "bowl"
-	glazesKey     = "glazes"      // JSON list of glaze names, in order applied
-	glazeNotesKey = "glaze_notes" // JSON string: how they were applied
+	formKey      = "form"       // JSON string, e.g. "bowl"
+	glazeTextKey = "glaze_text" // JSON string as written: "Pink with dabs of Red"
+	glazesKey    = "glazes"     // JSON list: known glazes found in glaze_text, for search
 )
-
-// Glazing is what a piece was glazed with.
-type Glazing struct {
-	Glazes []string
-	Notes  string
-}
-
-func (g Glazing) Empty() bool { return len(g.Glazes) == 0 && g.Notes == "" }
-
-// CleanGlazes trims names, drops blanks and repeats (ignoring case), and
-// keeps the order given.
-func CleanGlazes(names []string) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, n := range names {
-		n = strings.TrimSpace(n)
-		if n == "" || seen[strings.ToLower(n)] {
-			continue
-		}
-		seen[strings.ToLower(n)] = true
-		out = append(out, n)
-	}
-	return out
-}
 
 // PieceDetails are a piece's free-text details.
 type PieceDetails struct {
-	Form    string
-	Glazing Glazing
+	Form      string
+	GlazeText string   // as written
+	Glazes    []string // known glaze names found in GlazeText
 }
 
 func (s *Store) GetDetails(ctx context.Context, pieceID int64) (PieceDetails, error) {
 	var d PieceDetails
 	rows, err := s.DB.QueryContext(ctx,
 		"SELECT key, value FROM metadata WHERE piece_id = ? AND key IN (?, ?, ?) AND value IS NOT NULL",
-		pieceID, formKey, glazesKey, glazeNotesKey)
+		pieceID, formKey, glazeTextKey, glazesKey)
 	if err != nil {
 		return d, err
 	}
@@ -64,10 +42,10 @@ func (s *Store) GetDetails(ctx context.Context, pieceID int64) (PieceDetails, er
 		switch key {
 		case formKey:
 			dst = &d.Form
+		case glazeTextKey:
+			dst = &d.GlazeText
 		case glazesKey:
-			dst = &d.Glazing.Glazes
-		case glazeNotesKey:
-			dst = &d.Glazing.Notes
+			dst = &d.Glazes
 		}
 		if err := json.Unmarshal([]byte(value), dst); err != nil {
 			return d, err
@@ -88,41 +66,25 @@ func setForm(ctx context.Context, tx *sql.Tx, pieceID int64, form string) error 
 	return setMeta(ctx, tx, pieceID, formKey, form, form == "")
 }
 
-func (s *Store) SetGlazing(ctx context.Context, pieceID int64, g Glazing) error {
+// SetGlazeText records how a piece was glazed, and the known glazes in it.
+func (s *Store) SetGlazeText(ctx context.Context, pieceID int64, text string) error {
 	_, err := withTx(ctx, s.DB, func(tx *sql.Tx) (struct{}, error) {
-		return struct{}{}, setGlazing(ctx, tx, pieceID, g)
+		return struct{}{}, setGlazeText(ctx, tx, pieceID, text)
 	})
 	return err
 }
 
-func setGlazing(ctx context.Context, tx *sql.Tx, pieceID int64, g Glazing) error {
-	g.Glazes = CleanGlazes(g.Glazes)
-	g.Notes = strings.TrimSpace(g.Notes)
-	if err := setMeta(ctx, tx, pieceID, glazesKey, g.Glazes, len(g.Glazes) == 0); err != nil {
+func setGlazeText(ctx context.Context, tx *sql.Tx, pieceID int64, text string) error {
+	text = strings.TrimSpace(text)
+	names, err := glazeNames(ctx, tx)
+	if err != nil {
 		return err
 	}
-	return setMeta(ctx, tx, pieceID, glazeNotesKey, g.Notes, g.Notes == "")
-}
-
-// GlazeNames lists every glaze name used so far, for suggestions.
-func (s *Store) GlazeNames(ctx context.Context) ([]string, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT DISTINCT g.value FROM metadata m, json_each(m.value) g
-		WHERE m.key = ? AND m.piece_id IS NOT NULL
-		ORDER BY g.value COLLATE NOCASE`, glazesKey)
-	if err != nil {
-		return nil, err
+	found := model.GlazesIn(text, names)
+	if err := setMeta(ctx, tx, pieceID, glazeTextKey, text, text == ""); err != nil {
+		return err
 	}
-	defer rows.Close()
-	var names []string
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			return nil, err
-		}
-		names = append(names, n)
-	}
-	return names, rows.Err()
+	return setMeta(ctx, tx, pieceID, glazesKey, found, len(found) == 0)
 }
 
 // Ratings are 1–5 scores given once a piece is finished; 0 = not rated.

@@ -14,15 +14,15 @@
   <form method="post" action="/projects/{{$proj.ID}}" class="stack" data-autosave
         hx-post="/projects/{{$proj.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
     <input type="hidden" name="autosave" value="1">
-    <label class="field">Name <input name="name" value="{{$proj.Name}}" placeholder="e.g. Set of 4 bowls"></label>
-    <label class="field">Notes <textarea name="notes" rows="4">{{$proj.Notes}}</textarea></label>
+    <label class="field">Name <input autocomplete="off" name="title" value="{{$proj.Name}}" placeholder="e.g. Set of 4 bowls"></label>
+    <label class="field">Notes <textarea autocomplete="off" name="notes" rows="4">{{$proj.Notes}}</textarea></label>
   </form>
 </section>
 
 <details class="disclosure">
   <summary>Add pieces to this project</summary>
   <form method="post" action="/projects/{{$proj.ID}}/pieces" class="stack">
-    <label class="field">Number of pieces <input type="number" name="count" value="1" min="1" max="50" inputmode="numeric"></label>
+    <label class="field">Number of pieces <input autocomplete="off" type="number" name="count" value="1" min="1" max="50" inputmode="numeric"></label>
     {{template "eventFields" (dict "Action" "thrown" "Date" .Today)}}
     <button class="button" type="submit">Add</button>
   </form>

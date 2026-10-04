@@ -67,3 +67,16 @@ func TestParseDate(t *testing.T) {
 		t.Errorf("ParseDate = %q, %v", got, err)
 	}
 }
+
+func TestStarted(t *testing.T) {
+	if Started.Result() != StateStarted || InProgress[0] != StateStarted {
+		t.Errorf("started pieces should be in the first home section")
+	}
+	opts := StateStarted.NextOptions()
+	if len(opts) != 2 || opts[0] != Thrown || opts[1] != Built {
+		t.Errorf("a started piece moves on by being thrown or built: %v", opts)
+	}
+	if len(Drying.NextOptions()) != 1 || StateFinished.NextOptions() != nil {
+		t.Errorf("other states have one way on, ended ones none")
+	}
+}

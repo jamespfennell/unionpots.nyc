@@ -32,6 +32,7 @@ go test ./...
 | `LOG_BACKUPS` | `off` to run without backups. Without this or the `SPACES_*` variables, the app refuses to start. |
 | `LOG_BACKUP_DIR` | Back up to a local directory instead of Spaces (testing). |
 | `LOG_MIN_PIECE_ID` | Lowest number given to a new piece automatically (default 1). Same as `serve -min-piece-id N`. Numbers already used are never reused, and backfill can still use lower ones. |
+| `LOG_LOGIN_MESSAGE` | Text shown above the password field on the login page, e.g. `Password: clay-pots-dev` for a local preview. Same as `serve -login-message`. **Never set it in production.** |
 | `LOG_ALLOW_EMPTY_DB` | `1` to start with an empty database even though backups exist. |
 
 ## Commands

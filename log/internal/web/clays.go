@@ -3,14 +3,12 @@ package web
 import (
 	"net/http"
 	"strconv"
-	"strings"
 
 	"unionpots.nyc/log/internal/db"
 )
 
-// formClays reads the clay pills (name "clay", repeated) and, if allowNew,
-// the "new_clay" box, creating that clay body if it doesn't exist yet.
-func (s *Server) formClays(r *http.Request, allowNew bool) ([]int64, error) {
+// formClays reads the selected clay pills (name "clay", repeated).
+func (s *Server) formClays(r *http.Request) ([]int64, error) {
 	if err := r.ParseForm(); err != nil {
 		return nil, err
 	}
@@ -19,13 +17,6 @@ func (s *Server) formClays(r *http.Request, allowNew bool) ([]int64, error) {
 		id, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
 			return nil, &db.UserError{Msg: "unknown clay body"}
-		}
-		ids = append(ids, id)
-	}
-	if name := strings.TrimSpace(r.FormValue("new_clay")); allowNew && name != "" {
-		id, err := s.Store.EnsureClay(r.Context(), name)
-		if err != nil {
-			return nil, err
 		}
 		ids = append(ids, id)
 	}
@@ -47,7 +38,7 @@ func (s *Server) clays(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) addClay(w http.ResponseWriter, r *http.Request) error {
-	id, err := s.Store.EnsureClay(r.Context(), r.FormValue("name"))
+	id, err := s.Store.EnsureClay(r.Context(), r.FormValue("title"))
 	if err != nil {
 		return err
 	}
@@ -80,7 +71,7 @@ func (s *Server) updateClay(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	c := db.Clay{ID: id, Name: r.FormValue("name"), Code: r.FormValue("code"), Price: r.FormValue("price"), Notes: r.FormValue("notes")}
+	c := db.Clay{ID: id, Name: r.FormValue("title"), Code: r.FormValue("code"), Price: r.FormValue("price"), Notes: r.FormValue("notes")}
 	if err := s.Store.UpdateClay(r.Context(), c); err != nil {
 		return err
 	}

@@ -10,9 +10,9 @@ import (
 	"unionpots.nyc/log/internal/model"
 )
 
-// Dimension inputs are named h_<key>, w_<key>, d_<key> and round_<key>, where
-// key is "step" (next-step card), a step's action (piece page) or "new" (new
-// piece form). With round set, depth is the width.
+// Dimension inputs are named h_<key>, w_<key> and d_<key>, where key is
+// "step" (next-step card), a step's action (edit page) or "new" (new piece
+// form).
 func formDims(r *http.Request, key string) (model.Dims, error) {
 	var d model.Dims
 	for _, f := range []struct {
@@ -25,9 +25,6 @@ func formDims(r *http.Request, key string) (model.Dims, error) {
 			return d, &db.UserError{Msg: fmt.Sprintf("%s: %v", strings.ToUpper(f.label[:1])+f.label[1:], err)}
 		}
 		*f.dst = v
-	}
-	if r.FormValue("round_"+key) == "1" {
-		d.D = d.W
 	}
 	return d, nil
 }
@@ -69,12 +66,14 @@ func shrinkage(m db.Measurements) string {
 	return strings.Join(parts, ", ")
 }
 
-// measureSteps lists the steps shown in the piece page's measurements form:
-// how the piece started (thrown or built), queued for bisque, finished.
+// measureSteps lists the steps shown in the measurements form: thrown (or
+// built, for a built piece), queued for bisque, finished.
 func measureSteps(events []db.Event, m db.Measurements) []measureStep {
 	start := model.Thrown
-	if len(events) > 0 && events[0].Action == model.Built {
-		start = model.Built
+	for _, e := range events {
+		if e.Action == model.Built {
+			start = model.Built
+		}
 	}
 	var steps []measureStep
 	for _, a := range []model.Action{start, model.QueuedBisque, model.Finished} {

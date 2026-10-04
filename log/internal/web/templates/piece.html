@@ -5,12 +5,24 @@
 {{if .ShowProject}}<p class="part-of">Part of the <a href="/projects/{{.Project.ID}}">{{.Project.DisplayName}}</a> project</p>{{end}}
 
 {{with $p.State.Next}}
+{{$choice := gt (len $.NextOptions) 1}}
 <form method="post" action="/pieces/{{$p.ID}}/events" class="next-step">
-  <input type="hidden" name="action" value="{{.}}">
+  {{if not $choice}}<input type="hidden" name="action" value="{{.}}">{{end}}
   <input type="hidden" name="date" value="{{$.Today}}">
-  {{if or $.Siblings $.NextDims $.NextGlazes}}
+  {{if or $.Siblings $.NextDims $.NextGlazes $choice}}
   <div class="next-step-body">
-    {{template "alsoPieces" $}}
+    {{if $choice}}
+    {{/* A started piece moves on by being thrown or built. */}}
+    <fieldset class="pills">
+      <legend>What happened</legend>
+      <div class="pill-row">
+        {{range $i, $a := $.NextOptions}}
+        <label class="pill"><input type="radio" name="action" value="{{$a}}" class="visually-hidden"{{if eq $i 0}} checked{{end}}
+          data-label="Mark {{lower $a.Label}}" data-count-label="Mark {n} pieces {{lower $a.Label}}"><span>{{$a.Label}}</span></label>
+        {{end}}
+      </div>
+    </fieldset>
+    {{end}}
     {{if $.NextGlazes}}{{template "glazeInputs" (dict "Names" $.GlazeNames)}}{{end}}
     {{with $.NextDims}}
       {{if eq $p.State.Next "finished"}}
@@ -18,15 +30,31 @@
         <summary>Add measurements</summary>
         {{template "dims" .}}
       </details>
+      {{else if $choice}}
+      <div data-show-for="thrown">
+        <p class="dims-title">Thrown size</p>
+        {{template "dims" .}}
+      </div>
       {{else}}
       {{template "dims" .}}
       {{end}}
     {{end}}
+    {{template "alsoPieces" $}}
   </div>
   {{end}}
-  <button class="next-step-button" type="submit">→ {{.Label}} today<span data-also-count></span></button>
+  {{$verb := lower .Label}}
+  <button class="next-step-button" type="submit" data-count-label="Mark {n} pieces {{$verb}}">Mark {{$verb}}</button>
 </form>
 {{end}}
+
+<section>
+  <h2>Freeform notes <span class="save-status" data-save-status aria-live="polite"></span></h2>
+  <form method="post" action="/pieces/{{$p.ID}}" data-autosave
+        hx-post="/pieces/{{$p.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+    <input type="hidden" name="autosave" value="1">
+    <textarea autocomplete="off" name="notes" rows="4" aria-label="Freeform notes">{{$p.Notes}}</textarea>
+  </form>
+</section>
 
 <section>
   <h2>History</h2>
@@ -63,95 +91,22 @@
 </section>
 {{end}}
 
-<section>
-  <h2>Measurements <span class="save-status" data-save-status aria-live="polite"></span></h2>
-  <form method="post" action="/pieces/{{$p.ID}}/measurements" class="stack" data-autosave
-        hx-post="/pieces/{{$p.ID}}/measurements" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
-    <input type="hidden" name="autosave" value="1">
-    {{template "dims" .StepDims}}
-    <label class="field field-short">Clay weight (lb)
-      <input name="clay_weight" value="{{measure .Measurements.ClayWeight}}" inputmode="decimal" autocomplete="off">
-    </label>
-    {{with .Shrinkage}}<p class="muted">Shrinkage from bisque queue to finished: {{.}}</p>{{end}}
-  </form>
-</section>
 
 <section>
-  <h2>Details <span class="save-status" data-save-status aria-live="polite"></span></h2>
-  <form method="post" action="/pieces/{{$p.ID}}" class="stack" data-autosave
-        hx-post="/pieces/{{$p.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
-    <input type="hidden" name="autosave" value="1">
-    {{if .ShowProject}}
-    <label class="field">Project name <span class="muted">(shared by {{if eq (len .Project.Pieces) 2}}both pieces{{else}}all {{len .Project.Pieces}} pieces{{end}})</span>
-      <input name="name" value="{{.Project.Name}}" placeholder="e.g. Set of 4 bowls">
-    </label>
-    {{else}}
-    <label class="field">Name <input name="name" value="{{.Project.Name}}" placeholder="e.g. Big planter"></label>
+  <h2>Details</h2>
+  {{if .Facts}}
+  <dl class="facts">
+    {{range .Facts}}
+    <div>
+      <dt>{{.Label}}</dt>
+      <dd>{{if .Text}}{{range .Text}}{{if .Href}}<a href="{{.Href}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}{{end}}{{end}}{{range $i, $it := .Items}}{{if $i}}, {{end}}{{if $it.Href}}<a href="{{$it.Href}}">{{$it.Text}}</a>{{else if $it.Hover}}<span class="has-hint" title="{{$it.Hover}}">{{$it.Text}}</span>{{else}}{{$it.Text}}{{end}}{{end}}{{with .Note}}<span class="fact-note">{{.}}</span>{{end}}</dd>
+    </div>
     {{end}}
-    <label class="field">Form <input name="form" value="{{.Details.Form}}" autocomplete="off" placeholder="e.g. bowl"></label>
-    <input type="hidden" name="clays_shown" value="1">
-    {{template "clayPills" (dict "Clays" .Clays "Selected" .ClayIDs)}}
-    {{if .ShowGlazes}}
-    <input type="hidden" name="glazes_shown" value="1">
-    {{template "glazeInputs" (dict "Glazes" .Details.Glazing.Glazes "Notes" .Details.Glazing.Notes "Names" .GlazeNames)}}
-    {{end}}
-    <label class="field">Notes <textarea name="notes" rows="4">{{$p.Notes}}</textarea></label>
-  </form>
+  </dl>
+  {{else}}
+  <p class="empty">Nothing recorded yet.</p>
+  {{end}}
 </section>
 
-<details class="disclosure">
-  <summary>Advanced</summary>
-
-  <h3>Record something else</h3>
-  <p class="hint">For anything other than the usual next step, or a different date.</p>
-  <form method="post" action="/pieces/{{$p.ID}}/events" class="stack">
-    {{template "eventFields" (dict "Action" (or $p.State.Next "glazed") "Date" .Today)}}
-    {{template "alsoPieces" .}}
-    <button class="button" type="submit">Record<span data-also-count></span></button>
-  </form>
-
-  {{with .Undo}}
-  <h3>Undo last step</h3>
-  <form method="post" action="/pieces/{{$p.ID}}/events/{{.ID}}/delete" class="stack">
-    <button class="button" type="submit">Undo “{{.Action.Label}}” ({{shortDate .Date $.Today}})</button>
-  </form>
-  {{end}}
-
-  <h3>Project</h3>
-  <form method="post" action="/pieces/{{$p.ID}}/move" class="stack">
-    <label class="field">Join the project of piece
-      <input name="to" inputmode="numeric" placeholder="#" required>
-    </label>
-    <button class="button" type="submit">Move</button>
-  </form>
-  {{if .ShowProject}}
-  <form method="post" action="/pieces/{{$p.ID}}/move" class="stack follow">
-    <input type="hidden" name="to" value="0">
-    <button class="button" type="submit">Make #{{$p.ID}} its own project</button>
-  </form>
-  {{end}}
-
-  <h3>Delete</h3>
-  <form method="post" action="/pieces/{{$p.ID}}/delete" class="stack">
-    <label class="field">Type {{$p.ID}} to confirm
-      <input name="confirm" inputmode="numeric" autocomplete="off" required>
-    </label>
-    <button class="button danger" type="submit">Delete #{{$p.ID}} permanently</button>
-  </form>
-</details>
-{{end}}
-
-{{/* Pieces in the same project and state that an action can also apply to.
-     Tapping a number toggles it. */}}
-{{define "alsoPieces"}}
-{{with .Siblings}}
-<fieldset class="pills">
-  <legend>Also apply to other pieces in the project:</legend>
-  <div class="pill-row">
-    {{range .}}
-    <label class="pill"><input type="checkbox" name="also" value="{{.ID}}" class="visually-hidden"><span>#{{.ID}}</span></label>
-    {{end}}
-  </div>
-</fieldset>
-{{end}}
+<p class="edit-link"><a href="/pieces/{{$p.ID}}/edit">Edit piece</a></p>
 {{end}}

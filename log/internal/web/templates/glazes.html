@@ -1,0 +1,27 @@
+{{define "content"}}
+<h1>Glazes</h1>
+<p class="muted">Glaze names are recognised wherever they appear in a piece's glaze text.</p>
+
+<section>
+  {{if .Glazes}}
+  <div class="rows">
+    {{range .Glazes}}
+    <a class="row row-two" href="/glazes/{{.ID}}">
+      <span class="row-main">{{.Name}}</span>
+      <span class="row-end">{{.Pieces}} piece{{if ne .Pieces 1}}s{{end}}</span>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="empty">No glazes yet.</p>
+  {{end}}
+</section>
+
+<section>
+  <h2>Add a glaze</h2>
+  <form method="post" action="/glazes" class="stack">
+    <label class="field">Name <input name="title" required autocomplete="off" placeholder="e.g. Celadon"></label>
+    <button class="button" type="submit">Add</button>
+  </form>
+</section>
+{{end}}

@@ -334,3 +334,63 @@ func TestMinPieceID(t *testing.T) {
 		t.Fatalf("after backfill next = %d, want 121", next)
 	}
 }
+
+func TestStartedPieces(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	ids := create(t, s, NewPieces{Count: 2, Action: model.Started})
+	if p, _ := s.GetPiece(ctx, ids[0]); p.State != model.StateStarted {
+		t.Fatalf("state = %s, want started", p.State)
+	}
+	// One is thrown, the other built: two ways on from started.
+	if err := s.AddEvents(ctx, ids[:1], model.Thrown, "2026-10-05", StepDetails{Dims: model.Dims{H: 5}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddEvents(ctx, ids[1:], model.Built, "2026-10-09", StepDetails{}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := s.GetPiece(ctx, ids[0])
+	b, _ := s.GetPiece(ctx, ids[1])
+	if a.State != model.PendingTrimming || b.State != model.Drying {
+		t.Fatalf("states = %s, %s", a.State, b.State)
+	}
+	if m, _ := s.GetMeasurements(ctx, ids[0]); m.Dims[model.Thrown].H != 5 {
+		t.Fatalf("thrown size not recorded: %+v", m)
+	}
+}
+
+func TestMigration4KeepsEvents(t *testing.T) {
+	sqlDB, err := Open(filepath.Join(t.TempDir(), "log.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	ctx := context.Background()
+	if err := migrateTo(ctx, sqlDB, 3); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{DB: sqlDB, MinPieceID: 120}
+	ids := create(t, s, NewPieces{Count: 2})
+	if err := s.AddEvents(ctx, ids, model.Trimmed, "2026-10-02", StepDetails{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, sqlDB); err != nil {
+		t.Fatal(err)
+	}
+	events, _ := s.PieceEvents(ctx, ids[1])
+	if len(events) != 2 || events[1].Action != model.Trimmed {
+		t.Fatalf("events after migration: %+v", events)
+	}
+	// Deleting a piece still deletes its events (the foreign key survived).
+	if err := s.DeletePiece(ctx, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	sqlDB.QueryRow("SELECT COUNT(*) FROM events WHERE piece_id = ?", ids[1]).Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d events left for a deleted piece", n)
+	}
+	if _, err := s.CreatePieces(ctx, NewPieces{Count: 1, Action: model.Started, Date: "2026-10-05"}); err != nil {
+		t.Fatalf("started should be allowed after migration: %v", err)
+	}
+}

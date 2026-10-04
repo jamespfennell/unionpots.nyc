@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -33,8 +34,11 @@ type Server struct {
 	Store  *db.Store
 	Auth   *Auth
 	Backup func() backup.Status
-	Now    func() time.Time
-	Log    *slog.Logger
+	// LoginMessage, if set, is shown on the login page (e.g. the password of
+	// a local preview). Never set it in production.
+	LoginMessage string
+	Now          func() time.Time
+	Log          *slog.Logger
 
 	pages map[string]*template.Template
 }
@@ -46,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	private := http.NewServeMux()
 	private.Handle("GET /{$}", s.handle(s.home))
 	private.Handle("GET /pieces/{id}", s.handle(s.piece))
+	private.Handle("GET /pieces/{id}/edit", s.handle(s.pieceEdit))
 	private.Handle("POST /pieces/{id}", s.handle(s.updatePiece))
 	private.Handle("POST /pieces/{id}/events", s.handle(s.addEvent))
 	private.Handle("POST /pieces/{id}/events/{eid}/delete", s.handle(s.deleteEvent))
@@ -61,9 +66,14 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("GET /clays/{id}", s.handle(s.clay))
 	private.Handle("POST /clays/{id}", s.handle(s.updateClay))
 	private.Handle("POST /clays/{id}/delete", s.handle(s.deleteClay))
+	private.Handle("GET /glazes", s.handle(s.glazes))
+	private.Handle("POST /glazes", s.handle(s.addGlaze))
+	private.Handle("GET /glazes/{id}", s.handle(s.glaze))
+	private.Handle("POST /glazes/{id}", s.handle(s.renameGlaze))
+	private.Handle("POST /glazes/{id}/delete", s.handle(s.deleteGlaze))
+	private.Handle("GET /backups", s.handle(s.backups))
 	private.Handle("GET /new", s.handle(s.newForm))
 	private.Handle("POST /new", s.handle(s.create))
-	private.Handle("GET /created", s.handle(s.created))
 
 	static, _ := fs.Sub(staticFS, "static")
 	mux := http.NewServeMux()
@@ -124,12 +134,16 @@ func (s *Server) handle(f handlerFunc) http.Handler {
 // --- templates ---
 
 var funcs = template.FuncMap{
-	"static":     staticURL,
-	"lower":      strings.ToLower,
-	"daysAgo":    daysAgo,
-	"measure":    model.FormatMeasure,
-	"dimsNew":    func() []dimsRow { return []dimsRow{{Key: "new"}} },
-	"hasID":      hasID,
+	"static":  staticURL,
+	"lower":   strings.ToLower,
+	"daysAgo": daysAgo,
+	"measure": model.FormatMeasure,
+	"dimsNew": func() []dimsRow { return []dimsRow{{Key: "new"}} },
+	"hasID":   hasID,
+	"json": func(v any) (string, error) {
+		b, err := json.Marshal(v)
+		return string(b), err
+	},
 	"list":       func(xs ...int) []int { return xs },
 	"shortDate":  shortDate,
 	"actions":    func() []model.Action { return model.Actions },
@@ -192,6 +206,48 @@ func shortDate(date, today string) string {
 		return d.Format("Jan 2")
 	}
 	return d.Format("Jan 2, 2006")
+}
+
+// flashCookie carries what was just done to the next home page view, which
+// shows it once (so the address bar stays "/" and a reload doesn't repeat it).
+const flashCookie = "log_flash"
+
+// redirectHome sends the browser back to the home page with a one-off notice.
+func redirectHome(w http.ResponseWriter, r *http.Request, what url.Values) error {
+	http.SetCookie(w, &http.Cookie{
+		Name: flashCookie, Value: what.Encode(), Path: "/", MaxAge: 60,
+		HttpOnly: true, Secure: isHTTPS(r), SameSite: http.SameSiteLaxMode,
+	})
+	return redirect(w, r, "/")
+}
+
+// homeNotice describes what was just done: "Created #137 and #138." or
+// "Marked #135 and #136 glazed."
+func homeNotice(q url.Values) string {
+	list := func(v string) (string, int) {
+		var ids []string
+		for _, s := range strings.Split(v, ",") {
+			if _, err := strconv.ParseInt(s, 10, 64); err == nil {
+				ids = append(ids, "#"+s)
+			}
+		}
+		switch len(ids) {
+		case 0:
+			return "", 0
+		case 1:
+			return ids[0], 1
+		}
+		return strings.Join(ids[:len(ids)-1], ", ") + " and " + ids[len(ids)-1], len(ids)
+	}
+	if ids, n := list(q.Get("created")); n > 0 {
+		return "Created " + ids + "."
+	}
+	if ids, n := list(q.Get("marked")); n > 0 {
+		if a, err := model.ParseAction(q.Get("action")); err == nil {
+			return "Marked " + ids + " " + strings.ToLower(a.Label()) + "."
+		}
+	}
+	return ""
 }
 
 func joinIDs(ids []int64) string {
@@ -348,7 +404,8 @@ func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, status int,
 	data := struct {
 		Page
 		Next, Error string
-	}{s.page(r, "Log in"), safeNext(r.FormValue("next")), msg}
+		Message     string
+	}{s.page(r, "Log in"), safeNext(r.FormValue("next")), msg, s.LoginMessage}
 	return s.render(w, status, "login", data)
 }
 
@@ -362,6 +419,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.Auth.SetSession(w, r)
 	return redirect(w, r, safeNext(r.FormValue("next")))
+}
+
+// backups shows the state of the database backups.
+func (s *Server) backups(w http.ResponseWriter, r *http.Request) error {
+	data := struct {
+		Page
+		Status backup.Status
+		Now    time.Time
+	}{s.page(r, "Backups"), s.Backup(), s.Now()}
+	return s.render(w, http.StatusOK, "backups", data)
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) error {
@@ -389,101 +456,15 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 	data := struct {
 		Page
 		Sections []stateSection
-	}{s.page(r, "Log"), sections}
+		Notice   string // what just happened, after creating pieces or recording a step
+	}{s.page(r, "Log"), sections, ""}
+	if c, err := r.Cookie(flashCookie); err == nil {
+		if q, err := url.ParseQuery(c.Value); err == nil {
+			data.Notice = homeNotice(q)
+		}
+		http.SetCookie(w, &http.Cookie{Name: flashCookie, Path: "/", MaxAge: -1})
+	}
 	return s.render(w, http.StatusOK, "home", data)
-}
-
-func (s *Server) piece(w http.ResponseWriter, r *http.Request) error {
-	id, err := pathID(r, "id")
-	if err != nil {
-		return err
-	}
-	p, err := s.Store.GetPiece(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	events, err := s.Store.PieceEvents(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	proj, err := s.Store.GetProject(r.Context(), p.ProjectID)
-	if err != nil {
-		return err
-	}
-	m, err := s.Store.GetMeasurements(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	allClays, err := s.Store.Clays(r.Context())
-	if err != nil {
-		return err
-	}
-	pieceClays, err := s.Store.PieceClays(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	var clayIDs []int64
-	for _, c := range pieceClays {
-		clayIDs = append(clayIDs, c.ID)
-	}
-	details, err := s.Store.GetDetails(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	glazeNames, err := s.Store.GlazeNames(r.Context())
-	if err != nil {
-		return err
-	}
-	ratings, err := s.Store.GetRatings(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	// Glazes are asked for when glazing is next, and shown in Details once
-	// the piece has been glazed (or has glazes recorded).
-	showGlazes := !details.Glazing.Empty()
-	for _, e := range events {
-		showGlazes = showGlazes || e.Action == model.Glazed
-	}
-	siblings := sameState(proj, p)
-	// The next-step card asks for dimensions when the next step is measured.
-	// One set applies to every included piece; pieces that differ are
-	// recorded one at a time.
-	var nextDims []dimsRow
-	if p.State.Next().Measurable() {
-		nextDims = []dimsRow{{Key: "step"}}
-	}
-	var stepRows []dimsRow
-	for _, st := range measureSteps(events, m) {
-		stepRows = append(stepRows, dimsRow{Key: string(st.Action), Label: st.Action.Label(), Dims: st.Dims})
-	}
-	data := struct {
-		Page
-		Piece        db.Piece
-		Events       []db.Event
-		Project      db.Project
-		ShowProject  bool
-		Siblings     []db.Piece // same project and state; an action can apply to them too
-		Undo         *db.Event  // the latest event, if it can be undone (not the only one)
-		NextDims     []dimsRow  // dimension inputs for the next step, if it is measured
-		Measurements db.Measurements
-		StepDims     []dimsRow // the measurements form: one row per measured step
-		Shrinkage    string
-		Clays        []db.Clay // all clay bodies, for the pills
-		ClayIDs      []int64   // the ones this piece is made from
-		Details      db.PieceDetails
-		GlazeNames   []string // every glaze used so far, as suggestions
-		NextGlazes   bool     // the next step is glazing, so the card asks for glazes
-		ShowGlazes   bool
-		Ratings      []ratingRow // shown once the piece is finished (or already rated)
-	}{s.page(r, p.Title()), p, events, proj, len(proj.Pieces) > 1, siblings, nil, nextDims, m, stepRows, shrinkage(m), allClays, clayIDs,
-		details, glazeNames, p.State.Next() == model.Glazed, showGlazes, nil}
-	if p.State == model.StateFinished || ratings != (db.Ratings{}) {
-		data.Ratings = ratingRows(ratings)
-	}
-	if len(events) > 1 {
-		data.Undo = &events[len(events)-1]
-	}
-	return s.render(w, http.StatusOK, "piece", data)
 }
 
 // sameState returns the other pieces in p's project that are in p's state:
@@ -503,17 +484,24 @@ func (s *Server) updatePiece(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	// The piece page's name field edits its project's name: all names are
-	// project names.
 	p, err := s.Store.GetPiece(r.Context(), id)
 	if err != nil {
 		return err
 	}
-	if err := s.Store.UpdatePieceNotes(r.Context(), id, r.FormValue("notes")); err != nil {
+	if err := r.ParseForm(); err != nil {
 		return err
 	}
-	if _, ok := r.Form["name"]; ok {
-		if err := s.Store.RenameProject(r.Context(), p.ProjectID, strings.TrimSpace(r.FormValue("name"))); err != nil {
+	// Notes are edited on the piece page and everything else on the edit
+	// page, so only fields present in the form are updated.
+	if _, ok := r.Form["notes"]; ok {
+		if err := s.Store.UpdatePieceNotes(r.Context(), id, r.FormValue("notes")); err != nil {
+			return err
+		}
+	}
+	// The "title" field edits the project's name: all names are project names.
+	// (Fields aren't called "name", which browsers autofill with your own.)
+	if _, ok := r.Form["title"]; ok {
+		if err := s.Store.RenameProject(r.Context(), p.ProjectID, strings.TrimSpace(r.FormValue("title"))); err != nil {
 			return err
 		}
 	}
@@ -522,14 +510,13 @@ func (s *Server) updatePiece(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if r.FormValue("glazes_shown") == "1" {
-		g := db.Glazing{Glazes: r.Form["glaze"], Notes: r.FormValue("glaze_notes")}
-		if err := s.Store.SetGlazing(r.Context(), id, g); err != nil {
+	if _, ok := r.Form["glaze_text"]; ok {
+		if err := s.Store.SetGlazeText(r.Context(), id, r.FormValue("glaze_text")); err != nil {
 			return err
 		}
 	}
 	if r.FormValue("clays_shown") == "1" {
-		ids, err := s.formClays(r, false)
+		ids, err := s.formClays(r)
 		if err != nil {
 			return err
 		}
@@ -585,12 +572,13 @@ func (s *Server) addEvent(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	if action == model.Glazed {
-		details.Glazing = db.Glazing{Glazes: r.Form["glaze"], Notes: r.FormValue("glaze_notes")}
+		details.GlazeText = r.FormValue("glaze_text")
 	}
 	if err := s.Store.AddEvents(r.Context(), ids, action, date, details); err != nil {
 		return err
 	}
-	return redirect(w, r, pieceURL(id))
+	// Work on the piece is done for now: back to the list of everything.
+	return redirectHome(w, r, url.Values{"marked": {joinIDs(ids)}, "action": {string(action)}})
 }
 
 func (s *Server) deleteEvent(w http.ResponseWriter, r *http.Request) error {
@@ -661,7 +649,7 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := s.Store.UpdateProject(r.Context(), id, strings.TrimSpace(r.FormValue("name")), r.FormValue("notes")); err != nil {
+	if err := s.Store.UpdateProject(r.Context(), id, strings.TrimSpace(r.FormValue("title")), r.FormValue("notes")); err != nil {
 		return err
 	}
 	if isAutosave(r) {
@@ -697,7 +685,7 @@ func (s *Server) newForm(w http.ResponseWriter, r *http.Request) error {
 		NextID        int64
 		Clays         []db.Clay
 		SelectedClays []int64
-	}{s.page(r, "New piece"), next, clays, lastClays}
+	}{s.page(r, "New project"), next, clays, lastClays}
 	return s.render(w, http.StatusOK, "new", data)
 }
 
@@ -724,7 +712,7 @@ func (s *Server) createFrom(w http.ResponseWriter, r *http.Request, projectID in
 	if err != nil {
 		return err
 	}
-	clayIDs, err := s.formClays(r, true)
+	clayIDs, err := s.formClays(r)
 	if err != nil {
 		return err
 	}
@@ -732,15 +720,18 @@ func (s *Server) createFrom(w http.ResponseWriter, r *http.Request, projectID in
 	if err != nil {
 		return err
 	}
-	dims, err := formDims(r, "new")
-	if err != nil {
-		return err
+	// Only thrown pieces have a size yet.
+	var dims model.Dims
+	if action == model.Thrown {
+		if dims, err = formDims(r, "new"); err != nil {
+			return err
+		}
 	}
 	ids, err := s.Store.CreatePieces(r.Context(), db.NewPieces{
 		Count:      int(count),
 		StartID:    startID,
 		ProjectID:  projectID,
-		Name:       strings.TrimSpace(r.FormValue("name")),
+		Name:       strings.TrimSpace(r.FormValue("title")),
 		Form:       r.FormValue("form"),
 		Action:     action,
 		Date:       date,
@@ -751,32 +742,5 @@ func (s *Server) createFrom(w http.ResponseWriter, r *http.Request, projectID in
 	if err != nil {
 		return err
 	}
-	q := url.Values{"ids": {joinIDs(ids)}}
-	return redirect(w, r, "/created?"+q.Encode())
-}
-
-func (s *Server) created(w http.ResponseWriter, r *http.Request) error {
-	var pieces []db.Piece
-	for _, v := range strings.Split(r.URL.Query().Get("ids"), ",") {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
-			continue
-		}
-		p, err := s.Store.GetPiece(r.Context(), id)
-		if errors.Is(err, db.ErrNotFound) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		pieces = append(pieces, p)
-	}
-	if len(pieces) == 0 {
-		return redirect(w, r, "/")
-	}
-	data := struct {
-		Page
-		Pieces    []db.Piece
-		ProjectID int64
-	}{s.page(r, "Created"), pieces, pieces[0].ProjectID}
-	return s.render(w, http.StatusOK, "created", data)
+	return redirectHome(w, r, url.Values{"created": {joinIDs(ids)}})
 }

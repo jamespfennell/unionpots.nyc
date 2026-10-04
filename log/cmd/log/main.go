@@ -1,6 +1,8 @@
 // Command log runs the Union Pots work log.
 //
-//	log serve          run the web app (-min-piece-id N: first automatic piece number)
+//	log serve          run the web app
+//	                     -min-piece-id N: first automatic piece number
+//	                     -login-message "…": text on the login page (local previews only)
 //	log backup         snapshot the database to backup storage now
 //	log restore        restore the database and photos from backup storage
 //	log hash-password  print a bcrypt hash for LOG_PASSWORD_HASH
@@ -118,6 +120,8 @@ func serve(logger *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	minID := fs.Int64("min-piece-id", envInt64("LOG_MIN_PIECE_ID", 1),
 		"lowest number for automatically numbered pieces (default from $LOG_MIN_PIECE_ID, else 1)")
+	loginMessage := fs.String("login-message", os.Getenv("LOG_LOGIN_MESSAGE"),
+		"text shown on the login page, e.g. a local preview's password (default from $LOG_LOGIN_MESSAGE); never set in production")
 	fs.Parse(args)
 	if *minID < 1 {
 		return errors.New("-min-piece-id must be at least 1")
@@ -197,9 +201,10 @@ func serve(logger *slog.Logger, args []string) error {
 			Secret:       []byte(c.SessionSecret),
 			Now:          time.Now,
 		},
-		Backup: status,
-		Now:    time.Now,
-		Log:    logger,
+		Backup:       status,
+		LoginMessage: *loginMessage,
+		Now:          time.Now,
+		Log:          logger,
 	}
 	httpServer := &http.Server{
 		Addr:              c.Addr,

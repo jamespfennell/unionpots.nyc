@@ -1,4 +1,6 @@
 {{define "content"}}
+{{with .Notice}}<p class="notice" role="status">{{.}}</p>{{end}}
+<p class="home-new"><a class="button block" href="/new">+ New project</a></p>
 {{range .Sections}}
 <section class="group">
   <h2>{{.State.Label}}<span class="count">{{len .Pieces}}</span></h2>

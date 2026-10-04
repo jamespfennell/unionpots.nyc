@@ -1,0 +1,84 @@
+{{define "content"}}
+{{$p := .Piece}}
+<p class="part-of"><a href="/pieces/{{$p.ID}}">← #{{$p.ID}}{{with $p.Label}} {{.}}{{end}}</a></p>
+<h1>Edit #{{$p.ID}}</h1>
+<p class="muted">Corrections and unusual steps. Changes save as you go.</p>
+
+<section>
+  <h2>Details <span class="save-status" data-save-status aria-live="polite"></span></h2>
+  <form method="post" action="/pieces/{{$p.ID}}" class="stack" data-autosave
+        hx-post="/pieces/{{$p.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+    <input type="hidden" name="autosave" value="1">
+    {{if .ShowProject}}
+    <label class="field">Project name <span class="muted">(shared by {{if eq (len .Project.Pieces) 2}}both pieces{{else}}all {{len .Project.Pieces}} pieces{{end}})</span>
+      <input autocomplete="off" name="title" value="{{.Project.Name}}" placeholder="e.g. Set of 4 bowls">
+    </label>
+    {{else}}
+    <label class="field">Name <input autocomplete="off" name="title" value="{{.Project.Name}}" placeholder="e.g. Big planter"></label>
+    {{end}}
+    <label class="field">Form <input name="form" value="{{.Details.Form}}" autocomplete="off" placeholder="e.g. bowl"></label>
+    <input type="hidden" name="clays_shown" value="1">
+    {{template "clayPills" (dict "Clays" .Clays "Selected" .ClayIDs)}}
+    {{if .ShowGlazes}}
+    {{template "glazeInputs" (dict "Text" .Details.GlazeText "Names" .GlazeNames)}}
+    {{end}}
+  </form>
+</section>
+
+<section>
+  <h2>Measurements <span class="save-status" data-save-status aria-live="polite"></span></h2>
+  <form method="post" action="/pieces/{{$p.ID}}/measurements" class="stack" data-autosave
+        hx-post="/pieces/{{$p.ID}}/measurements" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+    <input type="hidden" name="autosave" value="1">
+    {{template "dims" .StepDims}}
+    <label class="field field-short">Clay weight (lb)
+      <input name="clay_weight" value="{{measure .Measurements.ClayWeight}}" inputmode="decimal" autocomplete="off">
+    </label>
+  </form>
+</section>
+
+<section>
+  <h2>Record something else</h2>
+  <p class="hint">For anything other than the usual next step, or a different date.</p>
+  <form method="post" action="/pieces/{{$p.ID}}/events" class="stack">
+    {{template "eventFields" (dict "Action" (or $p.State.Next "glazed") "Date" .Today)}}
+    {{template "alsoPieces" .}}
+    <button class="button" type="submit" data-count-label="Record for {n} pieces">Record</button>
+  </form>
+</section>
+
+{{with .Undo}}
+<section>
+  <h2>Undo last step</h2>
+  <form method="post" action="/pieces/{{$p.ID}}/events/{{.ID}}/delete" class="stack">
+    <button class="button" type="submit">Undo “{{.Action.Label}}” ({{shortDate .Date $.Today}})</button>
+  </form>
+</section>
+{{end}}
+
+<section>
+  <h2>Project</h2>
+  <form method="post" action="/pieces/{{$p.ID}}/move" class="stack">
+    <label class="field">Join the project of piece
+      <input autocomplete="off" name="to" inputmode="numeric" placeholder="#" required>
+    </label>
+    <button class="button" type="submit">Move</button>
+  </form>
+  {{if .ShowProject}}
+  <form method="post" action="/pieces/{{$p.ID}}/move" class="stack follow">
+    <input type="hidden" name="to" value="0">
+    <button class="button" type="submit">Make #{{$p.ID}} its own project</button>
+  </form>
+  {{end}}
+</section>
+
+<section>
+  <h2>Delete</h2>
+  <form method="post" action="/pieces/{{$p.ID}}/delete" class="stack">
+    <label class="field">Type {{$p.ID}} to confirm
+      <input name="confirm" inputmode="numeric" autocomplete="off" required>
+    </label>
+    <button class="button danger" type="submit">Delete #{{$p.ID}} permanently</button>
+  </form>
+</section>
+{{end}}

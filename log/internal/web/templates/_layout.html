@@ -7,7 +7,7 @@
   <meta name="robots" content="noindex">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Log">
-  <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"...","swap":true}],"scrollIntoViewOnBoost":false}'>
+  <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"...","swap":true}]}'>
   <title>{{.Title}} · Union Pots log</title>
   <link rel="manifest" href="{{static "manifest.webmanifest"}}">
   <link rel="icon" href="{{static "icon.svg"}}" type="image/svg+xml">
@@ -23,9 +23,18 @@
   {{if .LoggedIn}}
   <header class="top">
     <a class="brand" href="/">Union Pots · Log</a>
-    <nav>
-      <a class="nav-link" href="/new">+ New</a>
-    </nav>
+    <details class="menu" data-menu>
+      <summary aria-label="Menu"><span class="menu-icon" aria-hidden="true"></span></summary>
+      <nav class="menu-panel">
+        <a href="/new">New project</a>
+        <hr>
+        <a href="/clays">Clays</a>
+        <a href="/glazes">Glazes</a>
+        <hr>
+        <a href="/backups">Backups</a>
+        <form method="post" action="/logout" hx-boost="false"><button type="submit">Log out</button></form>
+      </nav>
+    </details>
   </header>
   {{end}}
   <main>

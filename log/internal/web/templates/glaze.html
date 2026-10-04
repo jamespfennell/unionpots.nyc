@@ -1,0 +1,34 @@
+{{define "content"}}
+{{$g := .Glaze}}
+<p class="part-of"><a href="/glazes">← All glazes</a></p>
+<h1>{{$g.Name}}</h1>
+
+<section>
+  <h2>Rename</h2>
+  <form method="post" action="/glazes/{{$g.ID}}" class="stack">
+    <label class="field">Name <input name="title" value="{{$g.Name}}" required autocomplete="off"></label>
+    <p class="hint">Pieces that mention it are updated to the new name. Renaming to another glaze's name merges the two.</p>
+    <button class="button" type="submit">Rename</button>
+  </form>
+</section>
+
+<section>
+  <h2>Pieces<span class="count">{{len .Pieces}}</span></h2>
+  {{if .Pieces}}
+  <div class="rows">
+    {{range .Pieces}}{{template "pieceRow" (dict "Piece" . "Today" $.Today "ShowState" true)}}{{end}}
+  </div>
+  {{else}}
+  <p class="empty">No piece mentions it yet.</p>
+  {{end}}
+</section>
+
+{{if eq $g.Pieces 0}}
+<details class="disclosure">
+  <summary>Advanced</summary>
+  <form method="post" action="/glazes/{{$g.ID}}/delete" class="stack">
+    <button class="button danger" type="submit">Delete {{$g.Name}}</button>
+  </form>
+</details>
+{{end}}
+{{end}}

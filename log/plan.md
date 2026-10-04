@@ -14,7 +14,7 @@ document is the source of truth for decisions made so far.
 | Stack | Go (stdlib `net/http`, `html/template`) + htmx, SQLite, photos on local disk. |
 | Hosting | Existing DigitalOcean VM, Docker container, data on the VM disk, behind the existing Caddy. |
 | Backups | DigitalOcean Spaces (S3-compatible): in-app hourly DB snapshot (≤1h data loss accepted), mirrored photo objects. No Litestream. |
-| Actions & states | History is dated actions (thrown, built, trimmed, queued for bisque, glazed, finished, broken). The current state is what the piece is waiting for: waiting to be trimmed → drying → waiting to be bisque fired → waiting to be glaze fired → finished / broken. |
+| Actions & states | History is dated actions (started, thrown, built, trimmed, queued for bisque, glazed, finished, broken). The current state is what the piece is waiting for: started → waiting to be trimmed → drying → waiting to be bisque fired → waiting to be glaze fired → finished / broken. |
 | Ratings | glaze / shape / overall, 1–5, only once a piece is finished. |
 | Metadata | Typed fields for the searchable things (form, clays, glazes, weight, 3-D dimensions, ratings) + free-form key/value + notes. Project-level values are inherited by pieces. |
 | Units | Imperial: inches and pounds. |
@@ -60,6 +60,7 @@ denormalised onto `pieces.state` in the same transaction.
 
 | Action (event) | Resulting state | Typical next action |
 |---|---|---|
+| `started` (added before throwing, or building over several sessions) | Started | thrown or built |
 | `thrown` | Waiting to be trimmed | trimmed |
 | `trimmed` | Drying | queued_bisque |
 | `built` (hand-built; replaces thrown + trimmed) | Drying | queued_bisque |
@@ -72,6 +73,12 @@ denormalised onto `pieces.state` in the same transaction.
   of a piece's life is waiting for drying or for the studio tech to fire it.
 - There is no "bisqued" state. Glazing happens straight after the bisque
   firing, so the `glazed` date stands in for the bisque date.
+- **Started** has two ways on, so its next-step card offers a choice:
+  Thrown (the default, with optional thrown size) or Built (no size); the
+  button follows the choice ("Mark thrown" / "Mark built").
+- The new-piece form's **Status** (Started / Thrown / Built, default
+  Thrown) sits below clay weight; "Thrown size" is only offered for
+  Thrown. Migration 004 adds `started` to the allowed actions.
 - Transitions are **not enforced**: any action can follow any other. This
   supports re-glazing (`finished → glazed → finished`), skipped steps and
   corrections. The UI just offers the typical next action as the primary
@@ -96,9 +103,9 @@ level, and whether it's public-eligible:
 | `form` | form ID | yes | Bowl, mug, plate, planter… (vocab). |
 | `clays` | list of clay IDs | yes | Usually one; supports multi-clay pieces. |
 | `glazes` | list of glaze IDs | yes | Which glazes were used, in rough order. |
-| `glaze_notes` | text | yes | Optional: how they were applied (dipped, layered, wax resist…). |
+| `glaze_text` | text | — | How it was glazed, free text; known glaze names in it are recognised. |
 | `clay_weight` | number (lb) | yes | Weight of clay at throwing, decimal pounds (e.g. 1.25). |
-| `dims_thrown` | dimensions | yes | `{h, w, d}` in inches, each optional. For round forms w = d = diameter; the form offers "round" to fill both from one input. |
+| `dims_thrown` | dimensions | yes | `{h, w, d}` in inches, each optional. |
 | `dims_bisqued` | dimensions | yes | |
 | `dims_finished` | dimensions | yes | Enables shrinkage % per clay body. |
 | `rating_glaze` | int 1–5 | no | Editable only when the piece is finished. |
@@ -245,6 +252,9 @@ CREATE VIEW effective_metadata AS
 Mobile-first. One column on phones, two on desktop. htmx for partial updates
 (record an action, edit a field, upload photos) without a JS framework.
 
+0. **Header**: "Union Pots · Log" (home) and a three-line menu button
+   opening: New project · Clays · Glazes · Backups · Log out (dividers
+   between groups). The menu closes when you tap elsewhere.
 1. **Home** (`/`) — in-progress work only: one section per in-progress state
    (waiting to be trimmed, drying, waiting to be bisque fired, waiting to be
    glaze fired),
@@ -253,39 +263,41 @@ Mobile-first. One column on phones, two on desktop. htmx for partial updates
    multi-piece projects ("Set of 4 bowls (2/4)"; a lone piece shows its own
    name), and how long ago it entered the state ("9 days ago").
    Plain lists, no dividers or state colours. Tapping a piece opens it. No bulk actions here. Finished and broken
-   pieces will be reachable another way (TBD). "+ New" lives in the header.
+   pieces will be reachable another way (TBD). A "+ New project" button sits
+   at the top.
 2. *(The separate per-state list page was folded into Home.)*
-3. **Piece** (`/pieces/121`):
-   - Title: **#121 Set of 4 bowls (2/4)** (as on Home), then the state in
-     plain text, then "Part of the *Set of 4 bowls* project" (linked) for
-     multi-piece or named projects.
-   - **Next-step widget**: a box whose bottom edge is the button for the
-     usual next step ("→ Queued for bisque today"). Inside the box: "Also
-     apply to other pieces in the project: #120 #122 #123". Tapping a number
-     highlights it and includes that piece; the button then reads "… · 3
-     pieces". Only pieces in the same project *and* the same state are
-     offered (a broken bowl or a piece at a different step never is), and the
-     server enforces this. This box is where step-specific input will go
-     later (e.g. dimensions when queuing for bisque).
-   - History reads left to right: Thrown › Trimmed › Queued for bisque, with
-     the date under each action. Read-only; events carry no notes (notes
-     belong to the piece).
-   - Details (name, notes) autosave as you type; a quiet "Saving…" / "Saved"
-     appears next to the heading ("Saved" fades after 2 s), or an error if a
-     save fails.
-   - Ratings (glaze, shape, overall as 1–5 pills; tap again to clear;
-     autosaved), shown once finished. Later: photos, public toggle with a
-     "view public page" link.
-   - **Advanced** (collapsed, at the bottom) for unusual steps: record any
-     action with any date, undo the last step, move to another piece's
-     project or split off, delete (type the number to confirm).
+3. **Piece** (`/pieces/121`), the everyday view. Details are recorded once,
+   at the step they belong to (clay when thrown, size when queued for
+   bisque…), so here they're read-only; editing them is a second-class
+   thing on the edit page.
+   - Title **#121 Set of 4 bowls (2/4)**, state, "Part of the … project".
+   - **Next-step card**: the step's inputs first (size when queuing for
+     bisque, glazes when glazing, optional size when finishing; this is
+     where details get recorded), then below a rule "Also apply to #120
+     #122" (same project and state only), then the button along the bottom
+     edge: "Mark glazed", or "Mark 3 pieces glazed" once others are picked.
+   - **Freeform notes**: the one editable box, autosaved.
+   - History, left to right: Thrown › Trimmed › Queued for bisque, dates
+     below.
+   - Ratings (1–5 pills, tap again to clear) once finished.
+   - **Details**, read-only: form, clay (linked), clay weight, thrown /
+     bone dry / finished size ("5in × 6in × 4in"; hover shows "height ×
+     width × depth"), shrinkage, glaze text with known glazes linked.
+   - "Edit piece" link.
+   - Creating pieces or recording a step returns to Home (work on the piece
+     is done for now), which shows a one-off green notice: "Created #137
+     and #138." / "Marked #135 glazed." There is no separate "created"
+     page.
+3a. **Edit piece** (`/pieces/121/edit`): name, form, clay, glazes and
+   measurements (autosaved); record something else (any step, any date);
+   undo last step; join another project or split off; delete.
 4. **Project** (`/projects/{id}`) — name, project-level metadata, member
    pieces as cards, "add piece to project", "move pieces", photos.
-5. **New piece / project** (`/new`) — minimum input: number of pieces
-   (default 1), started by throwing or building, date (today). Everything else is
-   optional and collapsed under "More details". The result shows the
-   allocated ID(s) in big type so they can be written on the pots. Backfill
-   mode: "Use specific ID", any latest action, any date.
+5. **New piece** (`/new`): how many (1–4 pills or a number), name, form,
+   clay (pills), clay weight, status (Started / Thrown / Built), thrown size
+   (only for Thrown), a different date if needed. Lands on Home with a
+   "Created #…" notice. Backfilling old pieces is no longer offered here;
+   how to do it is to be decided (see M5).
 6. **Search** (`/search`) — filters: state, form, clay, glaze, minimum
    rating per dimension, date range (any event, or a specific action), free
    text (names, notes, glaze notes, free-form values), and free-form
@@ -295,8 +307,9 @@ Mobile-first. One column on phones, two on desktop. htmx for partial updates
    count; detail pages show their pieces sorted by rating, plus average
    shrinkage (height/width/depth, thrown → finished) for clays. Rename/merge
    actions.
-8. **Admin** — deferred. Backup problems show in a site-wide banner. Export
-   and other admin tools come back when needed.
+8. **Backups** (`/backups`, from the menu): whether backups are on, where
+   they're stored, last check, last upload, last error. A list of stored
+   snapshots can come later.
 9. **Login** (`/login`).
 10. **Public piece** (`unionpots.nyc/p/121`, v2) — see §7.
 
@@ -476,7 +489,7 @@ with `-key` if a migration goes wrong.
 - Shown: ID, name, form, project name and sibling public pieces, event dates
   (made on / finished on), clays, glazes, dimensions (finished), public photos
   (derivatives only).
-- Never shown: ratings, notes, glaze_notes,
+- Never shown: ratings, notes, glaze text,
   originals.
 - The fixed public field set lives in the field registry
   (`PublicEligible`); a per-piece override can come later if needed.
@@ -489,7 +502,7 @@ with `-key` if a migration goes wrong.
 Taken from `index.html` and kept deliberately small: few colours, flat,
 simple. The rules (also at the top of `app.css`):
 
-- **Colour has a job.** Ink (`#1f1b18`) for content, muted grey (`#7a716a`)
+- **Colour has a job.** Ink (`#1f1b18`) for content, muted grey (`#5f5852`)
   for secondary information (dates, counts, labels, hints), terracotta
   (`#7a3f2e`) *only* for things you can press (links, disclosure toggles,
   the primary button, selected pills), red only for errors and deletion.
@@ -546,8 +559,9 @@ backups running to Spaces, restore drill performed. Next: M2.
   new-piece/project flow.
 
 **M2a — Measurements** ✓
-- Dimensions (H × W × D, inches; fractions like 4 1/2 accepted; "round"
-  means depth = width) recorded at thrown/built, queued for bisque and
+- Dimensions (H × W × D, inches; fractions like 4 1/2 accepted; no
+  "round" shortcut, it wasn't worth the extra UI) recorded at thrown/built,
+  queued for bisque and
   finished, stored as piece metadata `dims.<action>`; clay weight (lb) as
   `clay_weight`.
 - Asked for in the next-step card when queuing for bisque, behind "Add
@@ -564,16 +578,25 @@ backups running to Spaces, restore drill performed. Next: M2.
   from it; unused ones can be deleted). Pieces link via `piece_clays`, so a
   piece can use more than one.
 - New-piece form: clays as pills, most recently used first, the last piece's
-  clay(s) pre-selected, plus "or new clay" to create one on the spot. The
-  piece page's Details has the same pills (autosaved).
+  clay(s) pre-selected. The label reads "Clay (manage clays)", linking to
+  the clay list where clay bodies are added and edited (a plain link, so it
+  can't be mistaken for an unselected clay). The edit page has the same
+  pills (autosaved) and link.
 
 **M2c — Rest of metadata** ✓ (decided: no free-form fields, no project
 inheritance, no ownership; every piece holds its own values)
 - ✓ Form: free text (`form` metadata) on the new-piece form and in Details.
-- ✓ Glazes: free text, not records (`glazes` metadata: names in the order
-  applied; `glaze_notes`: how applied). Asked for in the next-step card when
-  glazing (applied to every piece in the step), editable in Details once
-  glazed. Boxes suggest names used before; filling one adds another.
+- ✓ Glazes: one free-text box ("Pink with dabs of Red"), stored as typed
+  (`glaze_text`). Known glazes (the `glazes` table) found in it are stored
+  as the piece's `glazes` for search: case-insensitive, whole words,
+  longest name first, order doesn't matter. The box shows a live preview
+  ("Glazes: Pink · Red"), suggests known names as you type, and has an
+  inline "(add a glaze)" that adds a name without leaving the page.
+  Adding a glaze doesn't re-scan older pieces; they pick it up when next
+  saved. A Glazes page (`/glazes`) lists them with piece counts; renaming
+  rewrites the pieces' text (and merges into an existing name); unused ones
+  can be deleted. The read-only details link each recognised glaze.
+  Migration 005 converted the earlier list + "how applied" note into text.
 - ✓ Ratings: glaze, shape, overall (1–5, `rating.*` metadata), a section on
   the piece page once finished.
 
@@ -587,8 +610,9 @@ inheritance, no ownership; every piece holds its own values)
 - Export zip, `rename-key` and vocab merge.
 
 **M5 — Backfill**
-- Enter the ~120 historical pieces from the notebook using backfill mode
-  (explicit IDs, backdated events).
+- Enter the ~120 historical pieces from the notebook. **How is TBD**: the
+  in-form "backfill" mode was removed from the New page. The server still
+  accepts an explicit piece number (`start_id`) for whatever replaces it.
 - If entry is too slow, add a desktop "spreadsheet-style" bulk form or CSV
   import.
 

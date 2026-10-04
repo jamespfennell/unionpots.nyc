@@ -15,10 +15,12 @@
   --line: #e4ddd3;
   --hover: #f2eee8;
   --ink: #1f1b18;
-  --muted: #7a716a;
+  --muted: #5f5852;
   --accent: #7a3f2e;
   --accent-ink: #faf8f5;
   --danger: #a3322a;
+  --success-bg: #e3eddc;
+  --success-ink: #2e5225;
 
   --serif: "Spectral", Georgia, serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -80,12 +82,45 @@ a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset:
   border-bottom: 1px solid var(--line);
 }
 .brand { font-size: 1.25rem; text-decoration: none; }
-.nav-link { text-decoration: none; font-weight: 500; padding: 0.5rem 0; }
+/* Menu: the three-line button opens a small panel under it. */
+.menu { position: relative; }
+.menu > summary {
+  list-style: none;
+  display: flex; align-items: center; justify-content: center;
+  width: var(--tap); height: var(--tap); margin-right: -0.6rem;
+  border-radius: var(--radius); cursor: pointer;
+}
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary:hover, .menu[open] > summary { background: var(--hover); }
+.menu-icon, .menu-icon::before, .menu-icon::after {
+  display: block; width: 20px; height: 2px; border-radius: 1px; background: var(--ink); position: relative;
+}
+.menu-icon::before, .menu-icon::after { content: ""; position: absolute; left: 0; }
+.menu-icon::before { top: -6px; }
+.menu-icon::after { top: 6px; }
+.menu-panel {
+  position: absolute; right: -0.6rem; top: calc(100% + 0.25rem); z-index: 10;
+  min-width: 12rem; padding: 0.4rem 0;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.menu-panel a, .menu-panel button {
+  display: block; width: 100%; text-align: left;
+  padding: 0.7rem 1rem; border: 0; background: none;
+  font: inherit; color: var(--ink); text-decoration: none; cursor: pointer;
+}
+.menu-panel a:hover, .menu-panel button:hover { background: var(--hover); }
+.menu-panel form { margin: 0; }
+.menu-panel hr { border: 0; border-top: 1px solid var(--line); margin: 0.4rem 0; }
+.home-new { margin: 0 0 1.5rem; }
+/* Filled a touch darker than the hover colour: noticeable, not loud. */
+.home-new .button { background: #ebe5dc; border-color: #ebe5dc; font-weight: 500; }
+.home-new .button:hover { background: #e3dcd1; border-color: #e3dcd1; }
+.later { margin-top: 2rem; }
 
 /* Page sections are separated by space; home groups also get a rule. */
 section { margin-top: 2.5rem; }
 .group { margin-top: 0; padding: 1.25rem 0 1.5rem; border-top: 1px solid var(--line); }
-.group:first-child { border-top: 0; padding-top: 0; }
+.group:first-child, .notice + .group { border-top: 0; padding-top: 0; }
 
 /* --- piece rows --- */
 
@@ -239,9 +274,10 @@ details.disclosure .hint { color: var(--muted); font-size: 0.875rem; margin: -0.
 
 /* Height / width / depth inputs. */
 .dims { display: flex; flex-direction: column; gap: 0.5rem; }
+.dims-title { font-size: 0.875rem; color: var(--muted); margin: 0 0 0.5rem; }
 .dims-head, .dims-inputs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
   align-items: center;
 }
@@ -249,19 +285,39 @@ details.disclosure .hint { color: var(--muted); font-size: 0.875rem; margin: -0.
 .dims-label + .dims-inputs { margin-top: 0.25rem; }
 .dims-label { font-size: 0.875rem; }
 .dims-inputs input[inputmode] { text-align: center; }
-.dims-inputs [data-depth]:disabled { visibility: hidden; }
 .dims-hint { font-size: 0.8rem; color: var(--muted); margin: 0; }
-.pill-small span { min-height: var(--tap); padding: 0 0.75rem; font-size: 0.875rem; }
 .field-short input { max-width: 8rem; }
 .field-short input[type="date"] { max-width: 12rem; }
 details.disclosure.inline { margin-top: 0; }
 .next-step-body { display: flex; flex-direction: column; gap: 1rem; }
+/* "Also apply to…" comes last, set off from the step's own inputs. */
+.next-step-body > * + .also { border-top: 1px solid var(--line); padding-top: 1rem; }
 
-/* A small link beside a field label, e.g. "edit clays". */
-.legend-link { margin-left: 0.5rem; font-size: 0.875rem; }
-.pill-custom input[name="new_clay"] { width: 9rem; min-height: 40px; border-radius: 999px; padding: 0 1rem; }
+/* A link inside a field label, e.g. "(manage clays)". */
+.legend-link { margin-left: 0.25rem; }
 
-.glaze-list { gap: 0.5rem; }
+/* Glaze text: suggestions, live preview and the inline "(add a glaze)". */
+.glaze-entry { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+.glaze-entry .field { width: 100%; }
+.glaze-suggest button { min-height: 36px; padding: 0 0.85rem; border: 1px solid var(--line); border-radius: 999px; background: transparent; font: inherit; color: var(--ink); cursor: pointer; }
+.glaze-preview { margin: 0; font-size: 0.875rem; color: var(--muted); }
+.glaze-preview strong { color: var(--ink); font-weight: 500; }
+.link-button { border: 0; padding: 0; background: none; font: inherit; font-size: 0.875rem; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pill-new { display: inline-flex; gap: 0.5rem; align-items: center; }
+.pill-new input { width: 11rem; min-height: 40px; border-radius: 999px; padding: 0 1rem; }
+.pill-new .button { min-height: 40px; border-radius: 999px; }
+
+/* Read-only details on the piece page: label above value. */
+.facts { margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.facts dt { font-size: 0.875rem; color: var(--muted); }
+.facts dd { margin: 0; }
+.fact-note { display: block; color: var(--muted); font-size: 0.875rem; }
+.has-hint { text-decoration: underline dotted var(--muted); text-underline-offset: 3px; cursor: help; }
+.edit-link { margin-top: 2.5rem; }
+.hint { color: var(--muted); font-size: 0.875rem; margin: -0.25rem 0 0.75rem; }
+
+/* One-line notice on the home page after creating pieces or recording a step. */
+.notice { background: var(--success-bg); color: var(--success-ink); border-radius: var(--radius); padding: 0.75rem 1rem; margin: 0 0 1.5rem; }
 
 /* --- misc pages --- */
 
@@ -271,8 +327,7 @@ details.disclosure.inline { margin-top: 0; }
 .follow { margin-top: 0.75rem; }
 
 
-.created-ids { display: flex; flex-wrap: wrap; gap: 0 1.5rem; margin: 1rem 0 0; }
-.created-ids a { font-family: var(--serif); font-size: 3.5rem; line-height: 1.1; color: var(--ink); text-decoration: none; }
 
 .login { max-width: 360px; margin: 18vh auto 0; }
 .login h1 { margin-bottom: 1.5rem; }
+.login-message { background: var(--hover); border-radius: var(--radius); padding: 0.75rem 1rem; margin: 0; }
