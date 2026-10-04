@@ -1,0 +1,46 @@
+{{define "content"}}
+<h1>New piece</h1>
+<form method="post" action="/new" class="stack page-form">
+  <fieldset class="pills">
+    <legend>Started by</legend>
+    <div class="pill-row">
+      <label class="pill"><input type="radio" name="action" value="thrown" checked data-start class="visually-hidden"><span>Throwing</span></label>
+      <label class="pill"><input type="radio" name="action" value="built" data-start class="visually-hidden"><span>Building</span></label>
+    </div>
+  </fieldset>
+  <fieldset class="pills" data-count>
+    <legend>How many pieces</legend>
+    <div class="pill-row">
+      {{range $n := (list 1 2 3 4)}}
+      <label class="pill"><input type="radio" name="count" value="{{$n}}"{{if eq $n 1}} checked{{end}} class="visually-hidden"><span>{{$n}}</span></label>
+      {{end}}
+      <label class="pill-custom">
+        <input type="radio" name="count" value="custom" class="visually-hidden" data-count-custom>
+        <span class="muted">or</span>
+        <input type="number" name="count_custom" min="1" max="50" inputmode="numeric" placeholder="other" aria-label="Other number of pieces">
+      </label>
+    </div>
+  </fieldset>
+  <label class="field">Name (optional)
+    <input name="name" placeholder="e.g. Set of 4 bowls">
+  </label>
+  <label class="field">Date <input type="date" name="date" value="{{.Today}}" required></label>
+
+  <details class="disclosure" data-backfill>
+    <summary>Backfill an old piece</summary>
+    <p class="hint">For pieces from the notebook. Choose the number and the latest thing that happened to it; this replaces “Started by”. With several pieces, numbers are consecutive.</p>
+    <div class="stack">
+      <label class="field">Piece number
+        <input name="start_id" inputmode="numeric" placeholder="next is #{{.NextID}}">
+      </label>
+      <label class="field">Latest event
+        <select name="action" disabled>
+          {{range actions}}<option value="{{.}}"{{if eq . "finished"}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+    </div>
+  </details>
+
+  <button class="button primary block" type="submit">Create</button>
+</form>
+{{end}}

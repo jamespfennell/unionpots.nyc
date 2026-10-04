@@ -1,0 +1,645 @@
+// Package web serves the log's HTML interface.
+package web
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"embed"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"path"
+	"strconv"
+	"strings"
+	"time"
+
+	"unionpots.nyc/log/internal/backup"
+	"unionpots.nyc/log/internal/db"
+	"unionpots.nyc/log/internal/model"
+)
+
+//go:embed templates/*.html
+var templateFS embed.FS
+
+//go:embed static
+var staticFS embed.FS
+
+type Server struct {
+	Store  *db.Store
+	Auth   *Auth
+	Backup func() backup.Status
+	Now    func() time.Time
+	Log    *slog.Logger
+
+	pages map[string]*template.Template
+}
+
+// Handler builds the routes. It panics if templates fail to parse.
+func (s *Server) Handler() http.Handler {
+	s.pages = mustParsePages()
+
+	private := http.NewServeMux()
+	private.Handle("GET /{$}", s.handle(s.home))
+	private.Handle("GET /pieces/{id}", s.handle(s.piece))
+	private.Handle("POST /pieces/{id}", s.handle(s.updatePiece))
+	private.Handle("POST /pieces/{id}/events", s.handle(s.addEvent))
+	private.Handle("POST /pieces/{id}/events/{eid}/delete", s.handle(s.deleteEvent))
+	private.Handle("POST /pieces/{id}/move", s.handle(s.movePiece))
+	private.Handle("POST /pieces/{id}/delete", s.handle(s.deletePiece))
+	private.Handle("GET /projects/{id}", s.handle(s.project))
+	private.Handle("POST /projects/{id}", s.handle(s.updateProject))
+	private.Handle("POST /projects/{id}/pieces", s.handle(s.addToProject))
+	private.Handle("GET /new", s.handle(s.newForm))
+	private.Handle("POST /new", s.handle(s.create))
+	private.Handle("GET /created", s.handle(s.created))
+
+	static, _ := fs.Sub(staticFS, "static")
+	mux := http.NewServeMux()
+	mux.Handle("GET /static/", cacheStatic(http.StripPrefix("/static/", http.FileServerFS(static))))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	mux.Handle("GET /login", s.handle(s.loginForm))
+	mux.Handle("POST /login", s.handle(s.login))
+	mux.Handle("POST /logout", s.handle(s.logout))
+	mux.Handle("/", s.Auth.Require(private))
+
+	// Rejects cross-site non-GET requests (CSRF) using Sec-Fetch-Site/Origin.
+	return http.NewCrossOriginProtection().Handler(securityHeaders(mux))
+}
+
+func securityHeaders(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A boosted form POST is answered with a redirect that the browser
+		// follows; tell htmx the final URL so history and reloads are right.
+		if r.Method == http.MethodGet && r.Header.Get("HX-Boosted") == "true" {
+			w.Header().Set("HX-Push-Url", r.URL.RequestURI())
+		}
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		w.Header().Set("X-Frame-Options", "DENY")
+		h.ServeHTTP(w, r)
+	})
+}
+
+func cacheStatic(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// handlerFunc returns an error instead of writing one; handle() renders it.
+type handlerFunc func(w http.ResponseWriter, r *http.Request) error
+
+func (s *Server) handle(f handlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := f(w, r)
+		if err == nil {
+			return
+		}
+		var ue *db.UserError
+		switch {
+		case errors.As(err, &ue):
+			s.renderError(w, r, http.StatusBadRequest, ue.Msg)
+		case errors.Is(err, db.ErrNotFound):
+			s.renderError(w, r, http.StatusNotFound, "Not found.")
+		default:
+			s.Log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+			s.renderError(w, r, http.StatusInternalServerError, "Something went wrong.")
+		}
+	})
+}
+
+// --- templates ---
+
+var funcs = template.FuncMap{
+	"static":     staticURL,
+	"lower":      strings.ToLower,
+	"daysAgo":    daysAgo,
+	"list":       func(xs ...int) []int { return xs },
+	"shortDate":  shortDate,
+	"actions":    func() []model.Action { return model.Actions },
+	"inProgress": func() []model.State { return model.InProgress },
+	"ago":        ago,
+	"dict": func(kv ...any) map[string]any {
+		m := map[string]any{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[kv[i].(string)] = kv[i+1]
+		}
+		return m
+	},
+}
+
+// staticVersion is a hash of the embedded static files. It is appended to
+// static URLs so browsers fetch new CSS/JS after each deploy despite caching.
+var staticVersion = func() string {
+	h := sha256.New()
+	fs.WalkDir(staticFS, "static", func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			b, _ := staticFS.ReadFile(p)
+			h.Write([]byte(p))
+			h.Write(b)
+		}
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}()
+
+func staticURL(name string) string { return "/static/" + name + "?v=" + staticVersion }
+
+// daysAgo describes a YYYY-MM-DD date relative to today: "today",
+// "yesterday", "5 days ago".
+func daysAgo(date, today string) string {
+	d, err1 := time.Parse(model.DateLayout, date)
+	t, err2 := time.Parse(model.DateLayout, today)
+	if err1 != nil || err2 != nil {
+		return date
+	}
+	switch n := int(t.Sub(d).Hours() / 24); {
+	case n < 0:
+		return date
+	case n == 0:
+		return "today"
+	case n == 1:
+		return "yesterday"
+	default:
+		return fmt.Sprintf("%d days ago", n)
+	}
+}
+
+// shortDate formats a YYYY-MM-DD date as "Sep 20", adding the year when it
+// isn't the current one: "Jun 1, 2025".
+func shortDate(date, today string) string {
+	d, err := time.Parse(model.DateLayout, date)
+	if err != nil {
+		return date
+	}
+	if len(today) >= 4 && date[:4] == today[:4] {
+		return d.Format("Jan 2")
+	}
+	return d.Format("Jan 2, 2006")
+}
+
+func joinIDs(ids []int64) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	return strings.Join(parts, ",")
+}
+
+func mustParsePages() map[string]*template.Template {
+	base := template.Must(template.New("").Funcs(funcs).ParseFS(templateFS, "templates/_*.html"))
+	files, err := fs.Glob(templateFS, "templates/*.html")
+	if err != nil {
+		panic(err)
+	}
+	pages := map[string]*template.Template{}
+	for _, f := range files {
+		name := path.Base(f)
+		if strings.HasPrefix(name, "_") {
+			continue
+		}
+		t := template.Must(template.Must(base.Clone()).ParseFS(templateFS, f))
+		pages[strings.TrimSuffix(name, ".html")] = t
+	}
+	return pages
+}
+
+// Page is the data common to every page; handlers embed it.
+type Page struct {
+	Title    string
+	LoggedIn bool
+	Today    string
+	Banner   string
+}
+
+func (s *Server) page(r *http.Request, title string) Page {
+	p := Page{Title: title, LoggedIn: s.Auth.valid(r), Today: model.Today(s.Now())}
+	if p.LoggedIn {
+		st := s.Backup()
+		switch {
+		case !st.Enabled:
+			p.Banner = "Backups disabled"
+		case st.Stale(s.Now()):
+			p.Banner = "Backups failing: last success " + ago(st.LastOK, s.Now())
+		}
+	}
+	return p
+}
+
+func (s *Server) render(w http.ResponseWriter, status int, name string, data any) error {
+	t, ok := s.pages[name]
+	if !ok {
+		return fmt.Errorf("no template %q", name)
+	}
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, "layout", data); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	data := struct {
+		Page
+		Message string
+	}{s.page(r, http.StatusText(status)), msg}
+	if err := s.render(w, status, "error", data); err != nil {
+		http.Error(w, msg, status)
+	}
+}
+
+func ago(t, now time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%d h ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+}
+
+// --- form helpers ---
+
+func pathID(r *http.Request, name string) (int64, error) {
+	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
+	if err != nil {
+		return 0, db.ErrNotFound
+	}
+	return id, nil
+}
+
+func formInt(r *http.Request, name string, def int64) (int64, error) {
+	v := strings.TrimPrefix(strings.TrimSpace(r.FormValue(name)), "#")
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0, &db.UserError{Msg: fmt.Sprintf("%q is not a number", v)}
+	}
+	return n, nil
+}
+
+// formEvent reads the action and date fields; the date defaults to today.
+func (s *Server) formEvent(r *http.Request) (model.Action, string, error) {
+	action, err := model.ParseAction(r.FormValue("action"))
+	if err != nil {
+		return "", "", &db.UserError{Msg: err.Error()}
+	}
+	date := r.FormValue("date")
+	if date == "" {
+		date = model.Today(s.Now())
+	}
+	if date, err = model.ParseDate(date); err != nil {
+		return "", "", &db.UserError{Msg: err.Error()}
+	}
+	return action, date, nil
+}
+
+// isAutosave reports whether a form post came from an htmx autosave, which
+// expects 204 rather than a redirect. Without JS the same form falls back to a
+// normal post-redirect-get.
+func isAutosave(r *http.Request) bool {
+	return r.FormValue("autosave") == "1" && r.Header.Get("HX-Request") == "true"
+}
+
+func redirect(w http.ResponseWriter, r *http.Request, to string) error {
+	http.Redirect(w, r, to, http.StatusSeeOther)
+	return nil
+}
+
+func pieceURL(id int64) string { return "/pieces/" + strconv.FormatInt(id, 10) }
+
+// --- auth handlers ---
+
+func (s *Server) loginForm(w http.ResponseWriter, r *http.Request) error {
+	if s.Auth.valid(r) {
+		return redirect(w, r, safeNext(r.URL.Query().Get("next")))
+	}
+	return s.renderLogin(w, r, http.StatusOK, "")
+}
+
+func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, status int, msg string) error {
+	data := struct {
+		Page
+		Next, Error string
+	}{s.page(r, "Log in"), safeNext(r.FormValue("next")), msg}
+	return s.render(w, status, "login", data)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
+	ok, limited := s.Auth.CheckPassword(r, r.FormValue("password"))
+	if limited {
+		return s.renderLogin(w, r, http.StatusTooManyRequests, "Too many attempts. Wait a minute and try again.")
+	}
+	if !ok {
+		return s.renderLogin(w, r, http.StatusUnauthorized, "Wrong password.")
+	}
+	s.Auth.SetSession(w, r)
+	return redirect(w, r, safeNext(r.FormValue("next")))
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) error {
+	s.Auth.ClearSession(w, r)
+	return redirect(w, r, "/login")
+}
+
+// --- pages ---
+
+type stateSection struct {
+	State  model.State
+	Pieces []db.Piece
+}
+
+// home lists all in-progress work, one section per state.
+func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
+	var sections []stateSection
+	for _, st := range model.InProgress {
+		pieces, err := s.Store.PiecesInState(r.Context(), st)
+		if err != nil {
+			return err
+		}
+		sections = append(sections, stateSection{st, pieces})
+	}
+	data := struct {
+		Page
+		Sections []stateSection
+	}{s.page(r, "Log"), sections}
+	return s.render(w, http.StatusOK, "home", data)
+}
+
+func (s *Server) piece(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	p, err := s.Store.GetPiece(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	events, err := s.Store.PieceEvents(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	proj, err := s.Store.GetProject(r.Context(), p.ProjectID)
+	if err != nil {
+		return err
+	}
+	data := struct {
+		Page
+		Piece       db.Piece
+		Events      []db.Event
+		Project     db.Project
+		ShowProject bool
+		Siblings    []db.Piece // same project and state; an action can apply to them too
+		Undo        *db.Event  // the latest event, if it can be undone (not the only one)
+	}{s.page(r, p.Title()), p, events, proj, len(proj.Pieces) > 1 || proj.Name != "", sameState(proj, p), nil}
+	if len(events) > 1 {
+		data.Undo = &events[len(events)-1]
+	}
+	return s.render(w, http.StatusOK, "piece", data)
+}
+
+// sameState returns the other pieces in p's project that are in p's state:
+// the ones an action recorded on p can also be applied to.
+func sameState(proj db.Project, p db.Piece) []db.Piece {
+	var out []db.Piece
+	for _, sib := range proj.Pieces {
+		if sib.ID != p.ID && sib.State == p.State {
+			out = append(out, sib)
+		}
+	}
+	return out
+}
+
+func (s *Server) updatePiece(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	if err := s.Store.UpdatePiece(r.Context(), id, strings.TrimSpace(r.FormValue("name")), r.FormValue("notes")); err != nil {
+		return err
+	}
+	if isAutosave(r) {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	return redirect(w, r, pieceURL(id))
+}
+
+func (s *Server) addEvent(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	action, date, err := s.formEvent(r)
+	if err != nil {
+		return err
+	}
+	ids := []int64{id}
+	if err := r.ParseForm(); err != nil {
+		return err
+	}
+	if also := r.PostForm["also"]; len(also) > 0 {
+		p, err := s.Store.GetPiece(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		proj, err := s.Store.GetProject(r.Context(), p.ProjectID)
+		if err != nil {
+			return err
+		}
+		allowed := map[string]int64{}
+		for _, sib := range sameState(proj, p) {
+			allowed[strconv.FormatInt(sib.ID, 10)] = sib.ID
+		}
+		for _, v := range also {
+			sib, ok := allowed[v]
+			if !ok {
+				return &db.UserError{Msg: fmt.Sprintf("#%s isn't in this project at the same step, so the action can't apply to it.", v)}
+			}
+			ids = append(ids, sib)
+		}
+	}
+	if err := s.Store.AddEvents(r.Context(), ids, action, date); err != nil {
+		return err
+	}
+	return redirect(w, r, pieceURL(id))
+}
+
+func (s *Server) deleteEvent(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	eid, err := pathID(r, "eid")
+	if err != nil {
+		return err
+	}
+	if err := s.Store.DeleteEvent(r.Context(), id, eid); err != nil {
+		return err
+	}
+	return redirect(w, r, pieceURL(id))
+}
+
+func (s *Server) movePiece(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	to, err := formInt(r, "to", 0)
+	if err != nil {
+		return err
+	}
+	if to == id {
+		return &db.UserError{Msg: "A piece can't join its own project."}
+	}
+	if err := s.Store.MovePiece(r.Context(), id, to); err != nil {
+		return err
+	}
+	return redirect(w, r, pieceURL(id))
+}
+
+func (s *Server) deletePiece(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	if r.FormValue("confirm") != strconv.FormatInt(id, 10) {
+		return &db.UserError{Msg: fmt.Sprintf("To delete, type %d to confirm.", id)}
+	}
+	if err := s.Store.DeletePiece(r.Context(), id); err != nil {
+		return err
+	}
+	return redirect(w, r, "/")
+}
+
+func (s *Server) project(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	p, err := s.Store.GetProject(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	data := struct {
+		Page
+		Project db.Project
+	}{s.page(r, p.DisplayName()), p}
+	return s.render(w, http.StatusOK, "project", data)
+}
+
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	if err := s.Store.UpdateProject(r.Context(), id, strings.TrimSpace(r.FormValue("name")), r.FormValue("notes")); err != nil {
+		return err
+	}
+	if isAutosave(r) {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	return redirect(w, r, "/projects/"+strconv.FormatInt(id, 10))
+}
+
+func (s *Server) addToProject(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	return s.createFrom(w, r, id)
+}
+
+func (s *Server) newForm(w http.ResponseWriter, r *http.Request) error {
+	next, err := s.Store.NextPieceID(r.Context())
+	if err != nil {
+		return err
+	}
+	data := struct {
+		Page
+		NextID int64
+	}{s.page(r, "New piece"), next}
+	return s.render(w, http.StatusOK, "new", data)
+}
+
+func (s *Server) create(w http.ResponseWriter, r *http.Request) error {
+	return s.createFrom(w, r, 0)
+}
+
+func (s *Server) createFrom(w http.ResponseWriter, r *http.Request, projectID int64) error {
+	// "count" is 1–4 from the pills, or "custom" with the number typed into
+	// "count_custom".
+	countField := "count"
+	if r.FormValue("count") == "custom" {
+		countField = "count_custom"
+	}
+	count, err := formInt(r, countField, 1)
+	if err != nil {
+		return err
+	}
+	startID, err := formInt(r, "start_id", 0)
+	if err != nil {
+		return err
+	}
+	action, date, err := s.formEvent(r)
+	if err != nil {
+		return err
+	}
+	ids, err := s.Store.CreatePieces(r.Context(), db.NewPieces{
+		Count:     int(count),
+		StartID:   startID,
+		ProjectID: projectID,
+		Name:      strings.TrimSpace(r.FormValue("name")),
+		Action:    action,
+		Date:      date,
+	})
+	if err != nil {
+		return err
+	}
+	q := url.Values{"ids": {joinIDs(ids)}}
+	return redirect(w, r, "/created?"+q.Encode())
+}
+
+func (s *Server) created(w http.ResponseWriter, r *http.Request) error {
+	var pieces []db.Piece
+	for _, v := range strings.Split(r.URL.Query().Get("ids"), ",") {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			continue
+		}
+		p, err := s.Store.GetPiece(r.Context(), id)
+		if errors.Is(err, db.ErrNotFound) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		pieces = append(pieces, p)
+	}
+	if len(pieces) == 0 {
+		return redirect(w, r, "/")
+	}
+	data := struct {
+		Page
+		Pieces    []db.Piece
+		ProjectID int64
+	}{s.page(r, "Created"), pieces, pieces[0].ProjectID}
+	return s.render(w, http.StatusOK, "created", data)
+}

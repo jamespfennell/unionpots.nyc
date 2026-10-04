@@ -1,0 +1,95 @@
+{{define "content"}}
+{{$p := .Piece}}
+<h1>#{{$p.ID}}{{with $p.Label}} {{.}}{{end}}</h1>
+<p class="status">{{$p.State.Label}}</p>
+{{if .ShowProject}}<p class="part-of">Part of the <a href="/projects/{{.Project.ID}}">{{.Project.DisplayName}}</a> project</p>{{end}}
+
+{{with $p.State.Next}}
+<form method="post" action="/pieces/{{$p.ID}}/events" class="next-step">
+  <input type="hidden" name="action" value="{{.}}">
+  <input type="hidden" name="date" value="{{$.Today}}">
+  {{if $.Siblings}}<div class="next-step-body">{{template "alsoPieces" $}}</div>{{end}}
+  <button class="next-step-button" type="submit">→ {{.Label}} today<span data-also-count></span></button>
+</form>
+{{end}}
+
+<section>
+  <h2>History</h2>
+  <ol class="history">
+    {{range .Events}}
+    <li>
+      <span class="history-step">
+        <span>{{.Action.Label}}</span>
+        <span class="date">{{shortDate .Date $.Today}}</span>
+      </span>
+    </li>
+    {{end}}
+  </ol>
+</section>
+
+<section>
+  <h2>Details <span class="save-status" data-save-status aria-live="polite"></span></h2>
+  <form method="post" action="/pieces/{{$p.ID}}" class="stack" data-autosave
+        hx-post="/pieces/{{$p.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+    <input type="hidden" name="autosave" value="1">
+    <label class="field">Name <input name="name" value="{{$p.Name}}" placeholder="optional, e.g. big bowl"></label>
+    <label class="field">Notes <textarea name="notes" rows="4">{{$p.Notes}}</textarea></label>
+  </form>
+</section>
+
+<details class="disclosure">
+  <summary>Advanced</summary>
+
+  <h3>Record something else</h3>
+  <p class="hint">For anything other than the usual next step, or a different date.</p>
+  <form method="post" action="/pieces/{{$p.ID}}/events" class="stack">
+    {{template "eventFields" (dict "Action" (or $p.State.Next "glazed") "Date" .Today)}}
+    {{template "alsoPieces" .}}
+    <button class="button" type="submit">Record<span data-also-count></span></button>
+  </form>
+
+  {{with .Undo}}
+  <h3>Undo last step</h3>
+  <form method="post" action="/pieces/{{$p.ID}}/events/{{.ID}}/delete" class="stack">
+    <button class="button" type="submit">Undo “{{.Action.Label}}” ({{shortDate .Date $.Today}})</button>
+  </form>
+  {{end}}
+
+  <h3>Project</h3>
+  <form method="post" action="/pieces/{{$p.ID}}/move" class="stack">
+    <label class="field">Join the project of piece
+      <input name="to" inputmode="numeric" placeholder="#" required>
+    </label>
+    <button class="button" type="submit">Move</button>
+  </form>
+  {{if .ShowProject}}
+  <form method="post" action="/pieces/{{$p.ID}}/move" class="stack follow">
+    <input type="hidden" name="to" value="0">
+    <button class="button" type="submit">Make #{{$p.ID}} its own project</button>
+  </form>
+  {{end}}
+
+  <h3>Delete</h3>
+  <form method="post" action="/pieces/{{$p.ID}}/delete" class="stack">
+    <label class="field">Type {{$p.ID}} to confirm
+      <input name="confirm" inputmode="numeric" autocomplete="off" required>
+    </label>
+    <button class="button danger" type="submit">Delete #{{$p.ID}} permanently</button>
+  </form>
+</details>
+{{end}}
+
+{{/* Pieces in the same project and state that an action can also apply to.
+     Tapping a number toggles it. */}}
+{{define "alsoPieces"}}
+{{with .Siblings}}
+<fieldset class="pills">
+  <legend>Also apply to other pieces in the project:</legend>
+  <div class="pill-row">
+    {{range .}}
+    <label class="pill"><input type="checkbox" name="also" value="{{.ID}}" class="visually-hidden"><span>#{{.ID}}</span></label>
+    {{end}}
+  </div>
+</fieldset>
+{{end}}
+{{end}}

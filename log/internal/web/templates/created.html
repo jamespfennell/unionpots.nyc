@@ -1,0 +1,15 @@
+{{define "content"}}
+<h1>Created</h1>
+<p class="muted">Write {{if gt (len .Pieces) 1}}these numbers{{else}}this number{{end}} on the {{if gt (len .Pieces) 1}}pots{{else}}pot{{end}}:</p>
+<div class="created-ids">
+  {{range .Pieces}}<a href="/pieces/{{.ID}}">#{{.ID}}</a>{{end}}
+</div>
+<div class="buttons">
+  {{if gt (len .Pieces) 1}}
+  <a class="button block" href="/projects/{{.ProjectID}}">Open project</a>
+  {{else}}
+  {{with index .Pieces 0}}<a class="button block" href="/pieces/{{.ID}}">Open #{{.ID}}</a>{{end}}
+  {{end}}
+  <a class="button primary block" href="/new">+ Another</a>
+</div>
+{{end}}

@@ -1,0 +1,24 @@
+{{/* A piece in a list: number, label, how long it has been in its state, and
+     optionally the state itself. Args: Piece, Today, ShowState, HideLabel
+     (on the project page, where the project name would repeat). */}}
+{{define "pieceRow"}}
+{{with .Piece}}
+<a class="row" href="/pieces/{{.ID}}">
+  <span class="pid">#{{.ID}}</span>
+  <span class="row-main">{{if not $.HideLabel}}{{with .Label}}<span class="name">{{.}}</span>{{end}}{{end}}<span class="ago">{{daysAgo .StateDate $.Today}}</span></span>
+  {{if $.ShowState}}<span class="row-end">{{.State.Label}}</span>{{end}}
+</a>
+{{end}}
+{{end}}
+
+{{/* Action and date inputs. Args: Action (selected), Date. */}}
+{{define "eventFields"}}
+<label class="field">What happened
+  <select name="action">
+    {{range actions}}<option value="{{.}}"{{if eq . $.Action}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
+</label>
+<label class="field">Date
+  <input type="date" name="date" value="{{.Date}}" required>
+</label>
+{{end}}
