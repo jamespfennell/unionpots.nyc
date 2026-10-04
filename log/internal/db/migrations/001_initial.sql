@@ -7,8 +7,9 @@ CREATE TABLE projects (
 );
 
 -- Single row. Piece IDs are written on the pots, so they are never reused.
+-- The starting number comes from the -min-piece-id flag, not from here.
 CREATE TABLE id_sequence (next_piece_id INTEGER NOT NULL);
-INSERT INTO id_sequence (next_piece_id) VALUES (120);
+INSERT INTO id_sequence (next_piece_id) VALUES (1);
 
 CREATE TABLE pieces (
   id             INTEGER PRIMARY KEY,

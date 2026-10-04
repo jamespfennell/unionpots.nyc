@@ -31,6 +31,7 @@ go test ./...
 | `SPACES_KEY`, `SPACES_SECRET` | Spaces access key. |
 | `LOG_BACKUPS` | `off` to run without backups. Without this or the `SPACES_*` variables, the app refuses to start. |
 | `LOG_BACKUP_DIR` | Back up to a local directory instead of Spaces (testing). |
+| `LOG_MIN_PIECE_ID` | Lowest number given to a new piece automatically (default 1). Same as `serve -min-piece-id N`. Numbers already used are never reused, and backfill can still use lower ones. |
 | `LOG_ALLOW_EMPTY_DB` | `1` to start with an empty database even though backups exist. |
 
 ## Commands
@@ -73,6 +74,7 @@ One-time setup:
          SPACES_BUCKET: unionpots-log
          SPACES_KEY: "<key>"
          SPACES_SECRET: "<secret>"
+         LOG_MIN_PIECE_ID: "120"   # first automatic piece number
        volumes:
          - ./data:/data
        ports:

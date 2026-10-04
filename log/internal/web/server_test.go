@@ -40,7 +40,7 @@ func newApp(t *testing.T) *testApp {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("clay-pots"), bcrypt.MinCost)
 	now := func() time.Time { return time.Date(2026, 10, 3, 15, 0, 0, 0, time.UTC) }
 	s := &Server{
-		Store:  &db.Store{DB: sqlDB},
+		Store:  &db.Store{DB: sqlDB, MinPieceID: 120},
 		Auth:   &Auth{PasswordHash: hash, Secret: []byte(strings.Repeat("s", 32)), Now: now},
 		Backup: func() backup.Status { return backup.Status{} },
 		Now:    now,

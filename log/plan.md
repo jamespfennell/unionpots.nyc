@@ -21,7 +21,7 @@ document is the source of truth for decisions made so far.
 | Glazes | Typed list of glazes used + optional free-text "application notes" for complex cases. |
 | Firing details | Omitted for now (studio uses standard firings). Easy to add later as a typed field. |
 | Ownership | Dropped (not tracked). |
-| IDs | Piece ID = the number marked on the piece. Never reused. Counter starts at 120. No QR codes. |
+| IDs | Piece ID = the number marked on the piece. Never reused. Automatic numbering starts at a configurable minimum (120 in production). No QR codes. |
 | Stale-piece reminders | Not wanted. Instead: list all pieces in a given state. |
 | OCR of notebooks | Deferred to v3. |
 
@@ -37,8 +37,11 @@ document is the source of truth for decisions made so far.
   - New pieces get the next number from a monotonic counter (`id_sequence`), so
     deleting #130 never causes #130 to be handed out again.
   - When backfilling history, an explicit ID can be entered if unused.
-  - The counter starts at **120**: the first piece logged in the app is #120.
-    Historical pieces (#1–#119) are backfilled with explicit IDs.
+  - Automatic numbering starts at `-min-piece-id` / `LOG_MIN_PIECE_ID`
+    (120 in production, so the first piece logged in the app is #120;
+    default 1). It's a floor: the stored counter only moves forward, so
+    numbers are never reused. Historical pieces (#1–#119) are backfilled
+    with explicit IDs.
 - Single-piece projects are the common case, so the UI hides the project:
   "New piece" silently creates a project; the project page only appears once a
   project has 2+ pieces (or has a name).

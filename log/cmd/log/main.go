@@ -1,6 +1,6 @@
 // Command log runs the Union Pots work log.
 //
-//	log serve          run the web app
+//	log serve          run the web app (-min-piece-id N: first automatic piece number)
 //	log backup         snapshot the database to backup storage now
 //	log restore        restore the database and photos from backup storage
 //	log hash-password  print a bcrypt hash for LOG_PASSWORD_HASH
@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -40,7 +41,7 @@ func main() {
 	var err error
 	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
 	case "serve":
-		err = serve(logger)
+		err = serve(logger, args)
 	case "backup":
 		err = backupNow(logger)
 	case "restore":
@@ -96,6 +97,16 @@ func loadConfig() (config, error) {
 	return c, nil
 }
 
+func envInt64(key string, def int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+		fmt.Fprintf(os.Stderr, "ignoring %s=%q: not a number\n", key, v)
+	}
+	return def
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -103,7 +114,14 @@ func envOr(key, def string) string {
 	return def
 }
 
-func serve(logger *slog.Logger) error {
+func serve(logger *slog.Logger, args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	minID := fs.Int64("min-piece-id", envInt64("LOG_MIN_PIECE_ID", 1),
+		"lowest number for automatically numbered pieces (default from $LOG_MIN_PIECE_ID, else 1)")
+	fs.Parse(args)
+	if *minID < 1 {
+		return errors.New("-min-piece-id must be at least 1")
+	}
 	c, err := loadConfig()
 	if err != nil {
 		return err
@@ -173,7 +191,7 @@ func serve(logger *slog.Logger) error {
 	}
 
 	srv := &web.Server{
-		Store: &db.Store{DB: sqlDB},
+		Store: &db.Store{DB: sqlDB, MinPieceID: *minID},
 		Auth: &web.Auth{
 			PasswordHash: []byte(c.PasswordHash),
 			Secret:       []byte(c.SessionSecret),
@@ -193,7 +211,7 @@ func serve(logger *slog.Logger) error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", c.Addr, "data", c.DataDir)
+		logger.Info("listening", "addr", c.Addr, "data", c.DataDir, "min_piece_id", *minID)
 		errc <- httpServer.ListenAndServe()
 	}()
 

@@ -21,7 +21,7 @@ func newStore(t *testing.T) *Store {
 	if err := Migrate(context.Background(), sqlDB); err != nil {
 		t.Fatal(err)
 	}
-	return &Store{DB: sqlDB}
+	return &Store{DB: sqlDB, MinPieceID: 120}
 }
 
 func create(t *testing.T, s *Store, np NewPieces) []int64 {
@@ -303,5 +303,34 @@ func TestMigration2MovesPieceNamesToProjects(t *testing.T) {
 		if p.Label() != c.label || p.Notes != c.note {
 			t.Errorf("#%d: label %q notes %q; want %q, %q", c.id, p.Label(), p.Notes, c.label, c.note)
 		}
+	}
+}
+
+func TestMinPieceID(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+
+	// No minimum: numbering starts at #1.
+	s.MinPieceID = 0
+	if ids := create(t, s, NewPieces{Count: 2}); !equal(ids, []int64{1, 2}) {
+		t.Fatalf("ids = %v, want [1 2]", ids)
+	}
+	// Raising the minimum jumps ahead.
+	s.MinPieceID = 120
+	if ids := create(t, s, NewPieces{}); !equal(ids, []int64{120}) {
+		t.Fatalf("ids = %v, want [120]", ids)
+	}
+	// Lowering it never reuses numbers: the counter has moved on.
+	s.MinPieceID = 1
+	if next, _ := s.NextPieceID(ctx); next != 121 {
+		t.Fatalf("next = %d, want 121", next)
+	}
+	// Backfill below the minimum is still allowed.
+	s.MinPieceID = 120
+	if ids := create(t, s, NewPieces{StartID: 7}); !equal(ids, []int64{7}) {
+		t.Fatalf("backfill ids = %v", ids)
+	}
+	if next, _ := s.NextPieceID(ctx); next != 121 {
+		t.Fatalf("after backfill next = %d, want 121", next)
 	}
 }

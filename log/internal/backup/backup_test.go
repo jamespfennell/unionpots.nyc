@@ -32,7 +32,7 @@ func setup(t *testing.T) (*Backuper, *db.Store, DirStore) {
 		Now: func() time.Time { clock = clock.Add(time.Hour); return clock },
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	return b, &db.Store{DB: sqlDB}, store
+	return b, &db.Store{DB: sqlDB, MinPieceID: 120}, store
 }
 
 func TestSkipsUnchangedAndUploadsChanges(t *testing.T) {

@@ -23,6 +23,10 @@ func userErr(format string, args ...any) error {
 
 type Store struct {
 	DB *sql.DB
+	// MinPieceID is the lowest number given to a new piece automatically
+	// (e.g. to continue an existing notebook's numbering). Explicit
+	// backfill IDs may be lower. 0 or 1 means start at #1.
+	MinPieceID int64
 }
 
 type Piece struct {
@@ -112,10 +116,21 @@ type NewPieces struct {
 	Dims       model.Dims
 }
 
+// NextPieceID is the number the next automatically numbered piece will get:
+// the stored counter (which only moves forward, so numbers are never
+// reused), but at least MinPieceID.
 func (s *Store) NextPieceID(ctx context.Context) (int64, error) {
+	return s.nextPieceID(ctx, s.DB)
+}
+
+func (s *Store) nextPieceID(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (int64, error) {
 	var next int64
-	err := s.DB.QueryRowContext(ctx, "SELECT next_piece_id FROM id_sequence").Scan(&next)
-	return next, err
+	if err := q.QueryRowContext(ctx, "SELECT next_piece_id FROM id_sequence").Scan(&next); err != nil {
+		return 0, err
+	}
+	return max(next, s.MinPieceID, 1), nil
 }
 
 // CreatePieces creates pieces, each with an initial event, and returns
@@ -132,8 +147,8 @@ func (s *Store) CreatePieces(ctx context.Context, np NewPieces) ([]int64, error)
 	}
 	ts := now()
 	return withTx(ctx, s.DB, func(tx *sql.Tx) ([]int64, error) {
-		var next int64
-		if err := tx.QueryRowContext(ctx, "SELECT next_piece_id FROM id_sequence").Scan(&next); err != nil {
+		next, err := s.nextPieceID(ctx, tx)
+		if err != nil {
 			return nil, err
 		}
 		start := np.StartID
