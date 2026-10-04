@@ -80,17 +80,7 @@ docker run -d --name log.unionpots.nyc --restart unless-stopped \
 
 `--stop-timeout` leaves time for the final backup on shutdown.
 
-## Restore runbook
+## Restore
 
-Do this once for real before relying on the log, and after any change to
-the backup code.
-
-```sh
-docker stop log.unionpots.nyc
-mv /srv/log.unionpots.nyc /srv/log.unionpots.nyc.old       # never delete the old data first
-docker run --rm --env-file /srv/log.unionpots.nyc.env -v /srv/log.unionpots.nyc:/data \
-  jamespfennell/log.unionpots.nyc:latest restore         # optionally: -at 2026-10-01
-docker start log.unionpots.nyc
-```
-
-Then open a recent piece and check it looks right.
+See [`restore_playbook.md`](restore_playbook.md). Run it once as a drill
+before relying on the log, and again after any change to the backup code.

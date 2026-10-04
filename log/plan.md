@@ -451,15 +451,11 @@ transfer, with clay/glaze names resolved) plus `photos/originals/`. It's a
 human-readable, tool-independent archive of the life's work. Running it
 occasionally and keeping the zip on the desktop is the third copy.
 
-**Restore runbook** (in `log/README.md`, and actually performed once during
-M0):
-1. Stop the container.
-2. Delete or move `/data`.
-3. `log restore` (defaults to the newest snapshot; `--at 2026-10-01` or
-   `--key db/hourly/…` to pick an older one) downloads, gunzips and
-   integrity-checks it into `/data/log.db`, then downloads every photo object
-   into `/data/photos`.
-4. Start the container and spot-check a piece.
+**Restore** is documented step by step in `restore_playbook.md` (Compose
+on the VM): stop the service, move the data directory aside, run
+`log restore` (newest snapshot by default, or `-at`/`-key` for an older one,
+integrity-checked, photos downloaded too), start it, spot-check. Run once as
+a drill.
 
 ## 7. Public pages (v2)
 
