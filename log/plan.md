@@ -20,7 +20,7 @@ document is the source of truth for decisions made so far.
 | Units | Imperial: inches and pounds. |
 | Glazes | Typed list of glazes used + optional free-text "application notes" for complex cases. |
 | Firing details | Omitted for now (studio uses standard firings). Easy to add later as a typed field. |
-| Ownership | Record who has a finished piece (kept / gifted / sold, recipient, date). Always private. |
+| Ownership | Dropped (not tracked). |
 | IDs | Piece ID = the number marked on the piece. Never reused. Counter starts at 120. No QR codes. |
 | Stale-piece reminders | Not wanted. Instead: list all pieces in a given state. |
 | OCR of notebooks | Deferred to v3. |
@@ -42,6 +42,9 @@ document is the source of truth for decisions made so far.
 - Single-piece projects are the common case, so the UI hides the project:
   "New piece" silently creates a project; the project page only appears once a
   project has 2+ pieces (or has a name).
+- **All names are project names.** A single piece's name is its project's
+  name; the piece page's name field edits the project. (Migration 002 moved
+  any existing piece names up to their project, or into the piece's notes.)
 - Pieces can be moved between projects; projects can be merged/split by
   moving pieces. An empty project is deleted automatically.
 
@@ -128,8 +131,9 @@ A SQL view `effective_metadata` computes this so search can use it directly.
 
 ### 2.4 Ownership
 
-`piece_transfers(piece, date, kind, recipient, note)`, kind ∈ `kept`, `gifted`,
-`sold`, `other`. The latest row is "who has it". Never exposed publicly.
+Dropped: who has a finished piece isn't tracked. (The unused
+`piece_transfers` table from migration 001 can be removed in a later
+migration.)
 
 ### 2.5 Photos
 
@@ -161,7 +165,6 @@ CREATE TABLE id_sequence (next_piece_id INTEGER NOT NULL);  -- single row
 CREATE TABLE pieces (
   id             INTEGER PRIMARY KEY,         -- the number on the pot
   project_id     INTEGER NOT NULL REFERENCES projects(id),
-  name           TEXT,                        -- optional ("big bowl")
   notes          TEXT NOT NULL DEFAULT '',
   state          TEXT NOT NULL,               -- derived from the latest event
   public         INTEGER NOT NULL DEFAULT 0,
@@ -267,8 +270,9 @@ Mobile-first. One column on phones, two on desktop. htmx for partial updates
    - Details (name, notes) autosave as you type; a quiet "Saving…" / "Saved"
      appears next to the heading ("Saved" fades after 2 s), or an error if a
      save fails.
-   - Ratings section (only when finished), ownership section (only when
-     finished), photos, public toggle with a "view public page" link.
+   - Ratings (glaze, shape, overall as 1–5 pills; tap again to clear;
+     autosaved), shown once finished. Later: photos, public toggle with a
+     "view public page" link.
    - **Advanced** (collapsed, at the bottom) for unusual steps: record any
      action with any date, undo the last step, move to another piece's
      project or split off, delete (type the number to confirm).
@@ -369,7 +373,7 @@ log/
 - CI: add a second job to `.github/workflows/build.yml` that runs
   `go test ./...` and builds and pushes `jamespfennell/log.unionpots.nyc:latest`
   (path-filtered on `log/**`).
-- VM: run the container with `-v /srv/log.unionpots.nyc:/data`.
+- VM: a Docker Compose service `log.unionpots.nyc` with `./data` mounted at `/data` (see README).
 - DNS: `log.unionpots.nyc` A record pointing at the VM.
 - TLS and routing: the existing front Caddy on the VM gets two additions.
   The log container's port is published only on localhost (or the two share a
@@ -446,8 +450,7 @@ unbacked-up by accident.
 - Spaces bucket versioning is on, so an accidental delete is recoverable.
 
 **Export:** `log export out.zip` writes
-`data.json` (every project, piece, event, metadata row, vocab entry and
-transfer, with clay/glaze names resolved) plus `photos/originals/`. It's a
+`data.json` (every project, piece, event, metadata row and clay body) plus `photos/originals/`. It's a
 human-readable, tool-independent archive of the life's work. Running it
 occasionally and keeping the zip on the desktop is the third copy.
 
@@ -457,6 +460,11 @@ on the VM): stop the service, move the data directory aside, run
 integrity-checked, photos downloaded too), start it, spot-check. Run once as
 a drill.
 
+**Migrations:** before applying a schema migration the app uploads a snapshot
+to `db/pre-migration/<time>-v<old version>.db.gz`. These are kept forever and
+never chosen by a default restore (they have the old schema); restore one
+with `-key` if a migration goes wrong.
+
 ## 7. Public pages (v2)
 
 - `unionpots.nyc/p/{id}` shows a page only if `pieces.public = 1`; otherwise
@@ -465,7 +473,7 @@ a drill.
 - Shown: ID, name, form, project name and sibling public pieces, event dates
   (made on / finished on), clays, glazes, dimensions (finished), public photos
   (derivatives only).
-- Never shown: ratings, notes, glaze_notes, free-form fields, ownership,
+- Never shown: ratings, notes, glaze_notes,
   originals.
 - The fixed public field set lives in the field registry
   (`PublicEligible`); a per-piece override can come later if needed.
@@ -518,23 +526,53 @@ simple. The rules (also at the top of `app.css`):
 
 ## 10. Milestones
 
-**M0 — Skeleton and safety net**
+**Status (2026-10-04):** M0 and M1 done: deployed at log.unionpots.nyc,
+backups running to Spaces, restore drill performed. Next: M2.
+
+**M0 — Skeleton and safety net** ✓
 - Go module, `serve` with login/logout, migrations, layout template + CSS
   tokens.
 - Dockerfile, CI job, deployed at log.unionpots.nyc.
 - Hourly DB backup + `log restore` working against Spaces, **restore drill
   performed**.
 
-**M1 — Core workflow**
+**M1 — Core workflow** ✓
 - Projects, pieces, ID allocation, events, current-state
   denormalisation.
 - Home page grouped by state, piece page (history, notes, apply to project),
   new-piece/project flow.
 
-**M2 — Metadata**
-- Field registry, clays/glazes vocab with autocomplete and create-on-confirm.
-- Project inheritance with override/clear.
-- Free-form fields, ratings (finished only), ownership transfers.
+**M2a — Measurements** ✓
+- Dimensions (H × W × D, inches; fractions like 4 1/2 accepted; "round"
+  means depth = width) recorded at thrown/built, queued for bisque and
+  finished, stored as piece metadata `dims.<action>`; clay weight (lb) as
+  `clay_weight`.
+- Asked for in the next-step card when queuing for bisque, behind "Add
+  measurements" when finishing. One set of dimensions applies to every
+  piece included in the step; pieces that differ are recorded one at a time.
+- New-piece form: clay weight shown (optional; it's usually set), size
+  behind "Size". Both apply to every piece created.
+- Editable (autosaved) on the piece page, which also shows shrinkage from
+  bisque queue to finished.
+
+**M2b — Clay bodies** ✓
+- Clay bodies are records (`clays`: name, product code, price, notes) with
+  a list page (`/clays`) and an edit page (autosaved; lists the pieces made
+  from it; unused ones can be deleted). Pieces link via `piece_clays`, so a
+  piece can use more than one.
+- New-piece form: clays as pills, most recently used first, the last piece's
+  clay(s) pre-selected, plus "or new clay" to create one on the spot. The
+  piece page's Details has the same pills (autosaved).
+
+**M2c — Rest of metadata** ✓ (decided: no free-form fields, no project
+inheritance, no ownership; every piece holds its own values)
+- ✓ Form: free text (`form` metadata) on the new-piece form and in Details.
+- ✓ Glazes: free text, not records (`glazes` metadata: names in the order
+  applied; `glaze_notes`: how applied). Asked for in the next-step card when
+  glazing (applied to every piece in the step), editable in Details once
+  glazed. Boxes suggest names used before; filling one adds another.
+- ✓ Ratings: glaze, shape, overall (1–5, `rating.*` metadata), a section on
+  the piece page once finished.
 
 **M3 — Photos**
 - Upload (multi), derivatives, EXIF handling, gallery on piece/project

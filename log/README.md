@@ -44,7 +44,7 @@ log restore          restore newest snapshot + photos into LOG_DATA_DIR
 log hash-password    read a password, print its bcrypt hash
 ```
 
-## Deployment (DigitalOcean VM)
+## Deployment (DigitalOcean VM, Docker Compose)
 
 One-time setup:
 
@@ -53,8 +53,36 @@ One-time setup:
    deletes hourly backups older than 7 days itself, always keeping the newest
    one, and keeps `db/daily/` forever.
 2. **DNS**: an A record for `log.unionpots.nyc` pointing at the VM.
-3. **Env file** `/srv/log.unionpots.nyc.env` (mode 600) with the variables above.
-4. **Caddy**: add to the front Caddyfile and reload:
+3. **Password**: `go run ./cmd/log hash-password` (or
+   `docker run --rm -it jamespfennell/log.unionpots.nyc hash-password`), and a
+   session secret from `openssl rand -hex 32`.
+4. **Compose service**, in the compose file on the VM (keep it `chmod 600`;
+   it holds credentials):
+
+   ```yaml
+   services:
+     log.unionpots.nyc:
+       image: jamespfennell/log.unionpots.nyc:latest
+       restart: unless-stopped
+       environment:
+         # Compose interpolates $, so every $ in the bcrypt hash is doubled.
+         LOG_PASSWORD_HASH: "$$2a$$10$$..."
+         LOG_SESSION_SECRET: "<64 hex chars>"
+         SPACES_ENDPOINT: https://nyc3.digitaloceanspaces.com
+         SPACES_REGION: nyc3
+         SPACES_BUCKET: unionpots-log
+         SPACES_KEY: "<key>"
+         SPACES_SECRET: "<secret>"
+       volumes:
+         - ./data:/data
+       ports:
+         - "127.0.0.1:8081:8080"
+       stop_grace_period: 45s   # time for the final backup on shutdown
+   ```
+
+   `docker compose config` shows the resolved values; the hash should come
+   out with single `$`s. (An `env_file:` avoids the escaping if you prefer.)
+5. **Caddy**: add to the Caddyfile and reload:
 
    ```caddyfile
    log.unionpots.nyc {
@@ -65,22 +93,21 @@ One-time setup:
    }
    ```
 
-Run (CI pushes `jamespfennell/log.unionpots.nyc:latest` on pushes to `main`):
+   If Caddy runs in the same compose project, drop the `ports:` mapping and
+   use `reverse_proxy log.unionpots.nyc:8080` instead.
+
+Update (CI pushes `jamespfennell/log.unionpots.nyc:latest` on pushes to
+`main`):
 
 ```sh
-docker pull jamespfennell/log.unionpots.nyc:latest
-docker rm -f log.unionpots.nyc
-docker run -d --name log.unionpots.nyc --restart unless-stopped \
-  --env-file /srv/log.unionpots.nyc.env \
-  -v /srv/log.unionpots.nyc:/data \
-  -p 127.0.0.1:8081:8080 \
-  --stop-timeout 45 \
-  jamespfennell/log.unionpots.nyc:latest
+docker compose pull log.unionpots.nyc
+docker compose up -d log.unionpots.nyc
+docker compose logs -f log.unionpots.nyc   # expect "listening" and "backup uploaded"
 ```
-
-`--stop-timeout` leaves time for the final backup on shutdown.
 
 ## Restore
 
-See [`restore_playbook.md`](restore_playbook.md). Run it once as a drill
-before relying on the log, and again after any change to the backup code.
+Run [`restore.sh`](restore.sh) from the compose directory; the steps and
+what to do if something goes wrong are in
+[`restore_playbook.md`](restore_playbook.md). Run it once as a drill before
+relying on the log, and again after any change to the backup code.

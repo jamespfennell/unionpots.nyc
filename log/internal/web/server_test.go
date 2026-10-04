@@ -302,7 +302,7 @@ func TestAutosavePiece(t *testing.T) {
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("autosave: status %d", rec.Code)
 	}
-	if p, _ := a.store.GetPiece(context.Background(), 120); p.Name != "Big bowl" || p.Notes != "speckled" {
+	if p, _ := a.store.GetPiece(context.Background(), 120); p.ProjectName != "Big bowl" || p.Notes != "speckled" {
 		t.Fatalf("not saved: %+v", p)
 	}
 	// Without htmx (Enter with JS off) it falls back to a redirect.
@@ -368,5 +368,174 @@ func TestCreateCount(t *testing.T) {
 	}
 	if rec := a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"custom"}, "count_custom": {"lots"}}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad custom count: status %d", rec.Code)
+	}
+}
+
+func TestMeasurementsFlow(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+
+	// Created with clay weight and thrown size (applies to both pieces).
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}, "name": {"Cups"},
+		"clay_weight": {"1 1/4"}, "h_new": {"5"}, "w_new": {"4"}, "round_new": {"1"}})
+	m, _ := a.store.GetMeasurements(ctx, 121)
+	if m.ClayWeight != 1.25 || m.Dims[model.Thrown] != (model.Dims{H: 5, W: 4, D: 4}) {
+		t.Fatalf("created measurements: %+v", m)
+	}
+	a.do("POST", "/pieces/120/events", url.Values{"action": {"trimmed"}, "also": {"121"}})
+
+	// A drying piece's card asks for one set of dimensions, not one per piece.
+	page := a.do("GET", "/pieces/120", nil).Body.String()
+	if !strings.Contains(page, `name="h_step"`) || strings.Contains(page, `name="h_121"`) {
+		t.Fatalf("next-step card should ask for one set of dimensions")
+	}
+
+	// Bad input is a 400 and records nothing.
+	rec := a.do("POST", "/pieces/120/events", url.Values{"action": {"queued_bisque"}, "h_step": {"tall"}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad dims: status %d", rec.Code)
+	}
+	if p, _ := a.store.GetPiece(ctx, 120); p.State != model.Drying {
+		t.Fatalf("bad dims should record nothing; state %s", p.State)
+	}
+
+	// Queue both; the dimensions apply to each.
+	a.do("POST", "/pieces/120/events", url.Values{"action": {"queued_bisque"}, "also": {"121"},
+		"h_step": {"4 1/4"}, "w_step": {"3.5"}, "round_step": {"1"}})
+	for _, id := range []int64{120, 121} {
+		m, _ = a.store.GetMeasurements(ctx, id)
+		if m.Dims[model.QueuedBisque] != (model.Dims{H: 4.25, W: 3.5, D: 3.5}) {
+			t.Fatalf("#%d bisque dims: %+v", id, m.Dims)
+		}
+	}
+
+	// Edit on the piece page (autosave) and see shrinkage.
+	req := httptest.NewRequest("POST", "/pieces/120/measurements", strings.NewReader(url.Values{
+		"autosave": {"1"}, "clay_weight": {"1.25"},
+		"h_thrown": {"5"}, "w_thrown": {"4"}, "d_thrown": {"4"},
+		"h_queued_bisque": {"4.5"}, "w_queued_bisque": {"3.75"}, "round_queued_bisque": {"1"},
+		"h_finished": {"4"}, "w_finished": {"3.3"}, "round_finished": {"1"},
+	}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("HX-Request", "true")
+	req.AddCookie(a.cookie)
+	w := httptest.NewRecorder()
+	a.h.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("measurements autosave: status %d: %s", w.Code, w.Body)
+	}
+	if body := a.do("GET", "/pieces/120", nil).Body.String(); !strings.Contains(body, "height 11%, width 12%, depth 12%") {
+		t.Errorf("piece page should show shrinkage")
+	}
+}
+
+func TestClayBodies(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+
+	// A new clay typed on the New form is created and linked.
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "new_clay": {"Speckled buff"}})
+	clays, _ := a.store.PieceClays(ctx, 120)
+	if len(clays) != 1 || clays[0].Name != "Speckled buff" {
+		t.Fatalf("#120 clays: %+v", clays)
+	}
+	speckle := clays[0].ID
+
+	// The New form now shows it as a pill, pre-selected as the last used.
+	page := a.do("GET", "/new", nil).Body.String()
+	if !strings.Contains(page, fmt.Sprintf(`name="clay" value="%d" class="visually-hidden" checked`, speckle)) {
+		t.Fatalf("last used clay should be pre-selected")
+	}
+
+	// Add another clay on the clays page and switch #120 to it (autosave form).
+	rec := a.do("POST", "/clays", url.Values{"name": {"Porcelain"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("add clay: status %d", rec.Code)
+	}
+	porcelain, _ := a.store.EnsureClay(ctx, "Porcelain")
+	a.do("POST", "/pieces/120", url.Values{"clays_shown": {"1"}, "clay": {fmt.Sprint(porcelain)}, "notes": {""}})
+	if clays, _ := a.store.PieceClays(ctx, 120); len(clays) != 1 || clays[0].ID != porcelain {
+		t.Fatalf("#120 should now be porcelain: %+v", clays)
+	}
+
+	// Clay pages render; details save; unused clays can be deleted.
+	for _, path := range []string{"/clays", fmt.Sprintf("/clays/%d", porcelain)} {
+		if rec := a.do("GET", path, nil); rec.Code != http.StatusOK {
+			t.Errorf("GET %s: %d", path, rec.Code)
+		}
+	}
+	a.do("POST", fmt.Sprintf("/clays/%d", porcelain), url.Values{"name": {"Porcelain"}, "code": {"P-10"}, "price": {"$40"}})
+	if c, _ := a.store.GetClay(ctx, porcelain); c.Code != "P-10" || c.Price != "$40" {
+		t.Fatalf("clay details: %+v", c)
+	}
+	if rec := a.do("POST", fmt.Sprintf("/clays/%d/delete", porcelain), url.Values{}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("deleting a used clay: status %d", rec.Code)
+	}
+	if rec := a.do("POST", fmt.Sprintf("/clays/%d/delete", speckle), url.Values{}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("deleting an unused clay: status %d", rec.Code)
+	}
+}
+
+func TestFormAndGlazesFlow(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}, "form": {"bowl"}})
+	if d, _ := a.store.GetDetails(ctx, 121); d.Form != "bowl" {
+		t.Fatalf("form = %q", d.Form)
+	}
+	for _, act := range []string{"trimmed", "queued_bisque"} {
+		a.do("POST", "/pieces/120/events", url.Values{"action": {act}, "also": {"121"}})
+	}
+
+	// Waiting to be bisque fired: the card asks for glazes; Details doesn't yet.
+	page := a.do("GET", "/pieces/120", nil).Body.String()
+	if strings.Count(page, `name="glaze"`) != 1 || strings.Contains(page, `name="glazes_shown"`) {
+		t.Fatalf("glaze boxes: card should have one, Details none")
+	}
+
+	a.do("POST", "/pieces/120/events", url.Values{"action": {"glazed"}, "also": {"121"},
+		"glaze": {"Celadon", "Tenmoku", ""}, "glaze_notes": {"dipped"}})
+	d, _ := a.store.GetDetails(ctx, 121)
+	if strings.Join(d.Glazing.Glazes, ",") != "Celadon,Tenmoku" || d.Glazing.Notes != "dipped" {
+		t.Fatalf("#121 glazing: %+v", d.Glazing)
+	}
+
+	// Now Details shows them (plus an empty box) and edits save.
+	page = a.do("GET", "/pieces/120", nil).Body.String()
+	if !strings.Contains(page, `name="glaze" value="Tenmoku"`) || !strings.Contains(page, `<option value="Celadon">`) {
+		t.Fatalf("Details should show glazes with suggestions")
+	}
+	a.do("POST", "/pieces/120", url.Values{"glazes_shown": {"1"}, "glaze": {"Shino", ""}, "glaze_notes": {""}, "form": {"cup"}})
+	d, _ = a.store.GetDetails(ctx, 120)
+	if strings.Join(d.Glazing.Glazes, ",") != "Shino" || d.Form != "cup" {
+		t.Fatalf("#120 after edit: %+v", d)
+	}
+}
+
+func TestRatings(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	a.do("POST", "/new", url.Values{"action": {"thrown"}})
+	if strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), "rating_glaze") {
+		t.Fatalf("ratings shouldn't show before the piece is finished")
+	}
+	a.do("POST", "/pieces/120/events", url.Values{"action": {"finished"}})
+	if !strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), `name="rating_glaze" value="5"`) {
+		t.Fatalf("ratings should show once finished")
+	}
+	a.do("POST", "/pieces/120/ratings", url.Values{"rating_glaze": {"5"}, "rating_overall": {"4"}})
+	if r, _ := a.store.GetRatings(ctx, 120); r != (db.Ratings{Glaze: 5, Overall: 4}) {
+		t.Fatalf("ratings = %+v", r)
+	}
+	if !strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), `name="rating_glaze" value="5" class="visually-hidden" data-toggle-off checked`) {
+		t.Fatalf("saved rating should be selected")
+	}
+	if rec := a.do("POST", "/pieces/120/ratings", url.Values{"rating_shape": {"9"}}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("out of range: status %d", rec.Code)
 	}
 }

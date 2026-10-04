@@ -24,11 +24,32 @@
   <label class="field">Name (optional)
     <input name="name" placeholder="e.g. Set of 4 bowls">
   </label>
-  <label class="field">Date <input type="date" name="date" value="{{.Today}}" required></label>
+
+  <label class="field">Form (optional)
+    <input name="form" autocomplete="off" placeholder="e.g. bowl">
+  </label>
+
+  {{template "clayPills" (dict "Clays" .Clays "Selected" .SelectedClays "AllowNew" true)}}
+
+  <label class="field field-short">Clay weight (lb, optional)
+    <input name="clay_weight" inputmode="decimal" autocomplete="off" placeholder="per piece">
+  </label>
+
+  <details class="disclosure">
+    <summary>Size</summary>
+    <p class="hint">Optional. Applied to every piece if there are several.</p>
+    {{template "dims" (dimsNew)}}
+  </details>
+
+  <details class="disclosure">
+    <summary>Different date</summary>
+    <p class="hint">Defaults to today.</p>
+    <label class="field field-short">Date <input type="date" name="date" value="{{.Today}}" required></label>
+  </details>
 
   <details class="disclosure" data-backfill>
     <summary>Backfill an old piece</summary>
-    <p class="hint">For pieces from the notebook. Choose the number and the latest thing that happened to it; this replaces “Started by”. With several pieces, numbers are consecutive.</p>
+    <p class="hint">For pieces from the notebook. Choose the number and the latest thing that happened to it (set its date under “Different date”); this replaces “Started by”. With several pieces, numbers are consecutive.</p>
     <div class="stack">
       <label class="field">Piece number
         <input name="start_id" inputmode="numeric" placeholder="next is #{{.NextID}}">

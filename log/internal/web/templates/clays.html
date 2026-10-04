@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1>Clay bodies</h1>
+
+<section>
+  {{if .Clays}}
+  <div class="rows">
+    {{range .Clays}}
+    <a class="row row-two" href="/clays/{{.ID}}">
+      <span class="row-main">{{.Name}}{{with .Code}}<span class="ago">{{.}}</span>{{end}}</span>
+      <span class="row-end">{{.Pieces}} piece{{if ne .Pieces 1}}s{{end}}</span>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="empty">No clay bodies yet.</p>
+  {{end}}
+</section>
+
+<section>
+  <h2>Add a clay body</h2>
+  <form method="post" action="/clays" class="stack">
+    <label class="field">Name <input name="name" required autocomplete="off" placeholder="e.g. Speckled buff"></label>
+    <button class="button" type="submit">Add</button>
+  </form>
+</section>
+{{end}}

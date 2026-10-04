@@ -103,11 +103,11 @@ func TestStateFollowsLatestEvent(t *testing.T) {
 		t.Fatalf("new thrown piece is %s, want pending trimming", p.State)
 	}
 
-	if err := s.AddEvents(ctx, []int64{id}, model.Trimmed, "2026-10-03"); err != nil {
+	if err := s.AddEvents(ctx, []int64{id}, model.Trimmed, "2026-10-03", StepDetails{}); err != nil {
 		t.Fatal(err)
 	}
 	// A backdated event does not become current.
-	if err := s.AddEvents(ctx, []int64{id}, model.Glazed, "2026-09-01"); err != nil {
+	if err := s.AddEvents(ctx, []int64{id}, model.Glazed, "2026-09-01", StepDetails{}); err != nil {
 		t.Fatal(err)
 	}
 	p, _ := s.GetPiece(ctx, id)
@@ -115,7 +115,7 @@ func TestStateFollowsLatestEvent(t *testing.T) {
 		t.Fatalf("state = %s on %s, want drying on 2026-10-03", p.State, p.StateDate)
 	}
 
-	if err := s.AddEvents(ctx, []int64{id}, model.Broken, "2026-10-04"); err != nil {
+	if err := s.AddEvents(ctx, []int64{id}, model.Broken, "2026-10-04", StepDetails{}); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ = s.GetPiece(ctx, id); p.State != model.StateBroken {
@@ -148,10 +148,10 @@ func TestEventValidation(t *testing.T) {
 	ctx := context.Background()
 	id := create(t, s, NewPieces{})[0]
 	var ue *UserError
-	if err := s.AddEvents(ctx, []int64{id}, "bisqued", "2026-10-02"); !errors.As(err, &ue) {
+	if err := s.AddEvents(ctx, []int64{id}, "bisqued", "2026-10-02", StepDetails{}); !errors.As(err, &ue) {
 		t.Fatalf("unknown action: err = %v", err)
 	}
-	if err := s.AddEvents(ctx, []int64{id, 999}, model.Trimmed, "2026-10-02"); !errors.As(err, &ue) {
+	if err := s.AddEvents(ctx, []int64{id, 999}, model.Trimmed, "2026-10-02", StepDetails{}); !errors.As(err, &ue) {
 		t.Fatalf("missing piece: err = %v", err)
 	}
 	// The failed bulk insert must not have partially applied.
@@ -164,7 +164,7 @@ func TestBulkAdvanceAndLists(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	ids := create(t, s, NewPieces{Count: 4, Name: "Bowls"})
-	if err := s.AddEvents(ctx, ids[:3], model.Trimmed, "2026-10-02"); err != nil {
+	if err := s.AddEvents(ctx, ids[:3], model.Trimmed, "2026-10-02", StepDetails{}); err != nil {
 		t.Fatal(err)
 	}
 	drying, _ := s.PiecesInState(ctx, model.Drying)
@@ -185,8 +185,8 @@ func TestProjectsAndMoving(t *testing.T) {
 	if proj.Name != "Planter set" || len(proj.Pieces) != 2 {
 		t.Fatalf("project = %+v", proj)
 	}
-	if p, _ := s.GetPiece(ctx, single); p.Name != "Plate" {
-		t.Fatalf("single piece name = %q", p.Name)
+	if p, _ := s.GetPiece(ctx, single); p.ProjectName != "Plate" || p.Label() != "Plate" {
+		t.Fatalf("a single piece's name should be its project's: %q", p.ProjectName)
 	}
 
 	// Move the single piece into the set; its old project disappears.
@@ -256,5 +256,52 @@ func TestPieceLabelAndOrder(t *testing.T) {
 	}
 	if strings.Join(got, "; ") != strings.Join(want, "; ") {
 		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestMigration2MovesPieceNamesToProjects(t *testing.T) {
+	sqlDB, err := Open(filepath.Join(t.TempDir(), "log.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	ctx := context.Background()
+	if err := migrateTo(ctx, sqlDB, 1); err != nil {
+		t.Fatal(err)
+	}
+	// Schema v1: names could be on pieces.
+	for _, q := range []string{
+		`INSERT INTO projects (id, name, created_at, updated_at) VALUES (1, NULL, '', ''), (2, 'Bowls', '', ''), (3, 'Mug', '', '')`,
+		`INSERT INTO pieces (id, project_id, name, notes, state, created_at, updated_at) VALUES
+		   (120, 1, 'Sculpture', '', 'drying', '', ''),
+		   (121, 2, 'Big bowl', 'speckled', 'drying', '', ''),
+		   (122, 2, NULL, '', 'drying', '', ''),
+		   (123, 3, 'Mug', '', 'drying', '', '')`,
+	} {
+		if _, err := sqlDB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Migrate(ctx, sqlDB); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{DB: sqlDB}
+	checks := []struct {
+		id          int64
+		label, note string
+	}{
+		{120, "Sculpture", ""},                           // lone piece's name moved to its project
+		{121, "Bowls (1/2)", "Name: Big bowl\nspeckled"}, // name kept in notes
+		{122, "Bowls (2/2)", ""},
+		{123, "Mug", ""}, // already matched its project
+	}
+	for _, c := range checks {
+		p, err := s.GetPiece(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Label() != c.label || p.Notes != c.note {
+			t.Errorf("#%d: label %q notes %q; want %q, %q", c.id, p.Label(), p.Notes, c.label, c.note)
+		}
 	}
 }

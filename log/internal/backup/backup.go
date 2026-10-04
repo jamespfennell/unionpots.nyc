@@ -26,9 +26,10 @@ import (
 )
 
 const (
-	hourlyPrefix = "db/hourly/"
-	dailyPrefix  = "db/daily/"
-	PhotoPrefix  = "photos/"
+	hourlyPrefix       = "db/hourly/"
+	dailyPrefix        = "db/daily/"
+	preMigrationPrefix = "db/pre-migration/" // kept forever; restored only by -key
+	PhotoPrefix        = "photos/"
 
 	// Hourly snapshots older than this are deleted, except the newest one, so
 	// there is always at least one hourly snapshot. Daily ones are kept forever.
@@ -156,6 +157,29 @@ func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err 
 	b.status.LastUpload, b.status.LastKey, b.status.LastSize = now, key, len(gz)
 	b.Log.Info("backup uploaded", "key", key, "bytes", len(gz))
 	return true, nil
+}
+
+// BackupBeforeMigration uploads a snapshot of the database as it is before a
+// schema migration from version from. It goes under its own prefix, so a
+// regular backup taken in the same second can't overwrite it, and is kept
+// forever. It doesn't touch the change-detection state.
+func (b *Backuper) BackupBeforeMigration(ctx context.Context, from int) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	snap, err := b.snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	gz, err := gzipBytes(snap)
+	if err != nil {
+		return err
+	}
+	key := fmt.Sprintf("%s%s-v%d.db.gz", preMigrationPrefix, b.Now().UTC().Format(hourlyLayout), from)
+	if err := b.Store.Put(ctx, key, gz); err != nil {
+		return err
+	}
+	b.Log.Info("pre-migration backup uploaded", "key", key, "bytes", len(gz))
+	return nil
 }
 
 // prune deletes hourly snapshots older than hourlyRetention, always keeping
@@ -325,6 +349,9 @@ func chooseSnapshot(ctx context.Context, store ObjectStore, opts RestoreOptions)
 	}
 	best, bestTS := "", ""
 	for _, k := range keys {
+		if strings.HasPrefix(k, preMigrationPrefix) {
+			continue // old schema; only restored when asked for by key
+		}
 		ts := strings.TrimSuffix(path.Base(k), ".db.gz")
 		if opts.At != "" && ts[:min(len(ts), 10)] > opts.At {
 			continue

@@ -8,7 +8,22 @@
 <form method="post" action="/pieces/{{$p.ID}}/events" class="next-step">
   <input type="hidden" name="action" value="{{.}}">
   <input type="hidden" name="date" value="{{$.Today}}">
-  {{if $.Siblings}}<div class="next-step-body">{{template "alsoPieces" $}}</div>{{end}}
+  {{if or $.Siblings $.NextDims $.NextGlazes}}
+  <div class="next-step-body">
+    {{template "alsoPieces" $}}
+    {{if $.NextGlazes}}{{template "glazeInputs" (dict "Names" $.GlazeNames)}}{{end}}
+    {{with $.NextDims}}
+      {{if eq $p.State.Next "finished"}}
+      <details class="disclosure inline">
+        <summary>Add measurements</summary>
+        {{template "dims" .}}
+      </details>
+      {{else}}
+      {{template "dims" .}}
+      {{end}}
+    {{end}}
+  </div>
+  {{end}}
   <button class="next-step-button" type="submit">→ {{.Label}} today<span data-also-count></span></button>
 </form>
 {{end}}
@@ -27,12 +42,59 @@
   </ol>
 </section>
 
+{{with .Ratings}}
+<section>
+  <h2>Ratings <span class="save-status" data-save-status aria-live="polite"></span></h2>
+  <form method="post" action="/pieces/{{$p.ID}}/ratings" class="stack" data-autosave
+        hx-post="/pieces/{{$p.ID}}/ratings" hx-trigger="change, submit" hx-swap="none">
+    <input type="hidden" name="autosave" value="1">
+    {{range .}}
+    {{$row := .}}
+    <fieldset class="pills rating">
+      <legend>{{.Label}}</legend>
+      <div class="pill-row">
+        {{range $n := (list 1 2 3 4 5)}}
+        <label class="pill"><input type="radio" name="rating_{{$row.Name}}" value="{{$n}}" class="visually-hidden" data-toggle-off{{if eq $n $row.Value}} checked{{end}}><span>{{$n}}</span></label>
+        {{end}}
+      </div>
+    </fieldset>
+    {{end}}
+  </form>
+</section>
+{{end}}
+
+<section>
+  <h2>Measurements <span class="save-status" data-save-status aria-live="polite"></span></h2>
+  <form method="post" action="/pieces/{{$p.ID}}/measurements" class="stack" data-autosave
+        hx-post="/pieces/{{$p.ID}}/measurements" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+    <input type="hidden" name="autosave" value="1">
+    {{template "dims" .StepDims}}
+    <label class="field field-short">Clay weight (lb)
+      <input name="clay_weight" value="{{measure .Measurements.ClayWeight}}" inputmode="decimal" autocomplete="off">
+    </label>
+    {{with .Shrinkage}}<p class="muted">Shrinkage from bisque queue to finished: {{.}}</p>{{end}}
+  </form>
+</section>
+
 <section>
   <h2>Details <span class="save-status" data-save-status aria-live="polite"></span></h2>
   <form method="post" action="/pieces/{{$p.ID}}" class="stack" data-autosave
         hx-post="/pieces/{{$p.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
     <input type="hidden" name="autosave" value="1">
-    <label class="field">Name <input name="name" value="{{$p.Name}}" placeholder="optional, e.g. big bowl"></label>
+    {{if .ShowProject}}
+    <label class="field">Project name <span class="muted">(shared by {{if eq (len .Project.Pieces) 2}}both pieces{{else}}all {{len .Project.Pieces}} pieces{{end}})</span>
+      <input name="name" value="{{.Project.Name}}" placeholder="e.g. Set of 4 bowls">
+    </label>
+    {{else}}
+    <label class="field">Name <input name="name" value="{{.Project.Name}}" placeholder="e.g. Big planter"></label>
+    {{end}}
+    <label class="field">Form <input name="form" value="{{.Details.Form}}" autocomplete="off" placeholder="e.g. bowl"></label>
+    <input type="hidden" name="clays_shown" value="1">
+    {{template "clayPills" (dict "Clays" .Clays "Selected" .ClayIDs)}}
+    {{if .ShowGlazes}}
+    <input type="hidden" name="glazes_shown" value="1">
+    {{template "glazeInputs" (dict "Glazes" .Details.Glazing.Glazes "Notes" .Details.Glazing.Notes "Names" .GlazeNames)}}
+    {{end}}
     <label class="field">Notes <textarea name="notes" rows="4">{{$p.Notes}}</textarea></label>
   </form>
 </section>

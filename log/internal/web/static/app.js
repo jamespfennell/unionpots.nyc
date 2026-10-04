@@ -81,8 +81,48 @@
     }
   });
 
+  // Measurements: "Round" hides depth (the server copies width into it).
+  function syncRound(box) {
+    var depth = box.closest(".dims-inputs").querySelector("[data-depth]");
+    if (depth) depth.disabled = box.checked;
+  }
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (!t.matches) return;
+    if (t.matches("[data-round]")) syncRound(t);
+  });
+
+  // Glaze boxes: once the last one has text, add an empty one after it.
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!(t.matches && t.matches('input[name="glaze"]')) || t.value === "") return;
+    var list = t.closest("[data-glaze-list]");
+    var boxes = list.querySelectorAll('input[name="glaze"]');
+    if (boxes[boxes.length - 1] !== t) return;
+    var next = t.cloneNode(false);
+    next.value = "";
+    next.placeholder = "another glaze";
+    list.appendChild(next);
+  });
+
+  // Rating pills: tapping the selected number again clears it. The radio's
+  // state is remembered on pointerdown, before the browser checks it.
+  document.addEventListener("pointerdown", function (e) {
+    var label = e.target.closest && e.target.closest("label");
+    var radio = label && label.querySelector("input[data-toggle-off]");
+    if (radio) radio._wasChecked = radio.checked;
+  });
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t.matches && t.matches("input[data-toggle-off]")) || !t._wasChecked) return;
+    t.checked = false;
+    t._wasChecked = false;
+    t.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
   function init(root) {
     root.querySelectorAll("details[data-backfill]").forEach(syncBackfill);
+    root.querySelectorAll("[data-round]").forEach(syncRound);
     root.querySelectorAll("form").forEach(function (f) {
       if (f.querySelector('input[name="also"]')) syncAlsoCount(f);
     });

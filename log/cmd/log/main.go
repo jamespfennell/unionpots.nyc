@@ -151,7 +151,7 @@ func serve(logger *slog.Logger) error {
 	}
 	if dbExists && version < db.LatestVersion() && backuper != nil {
 		logger.Info("backing up before migrating", "from", version, "to", db.LatestVersion())
-		if _, err := backuper.RunOnce(ctx, true); err != nil {
+		if err := backuper.BackupBeforeMigration(ctx, version); err != nil {
 			return fmt.Errorf("pre-migration backup failed: %w", err)
 		}
 	}

@@ -178,3 +178,29 @@ func TestRunOncePrunes(t *testing.T) {
 		t.Fatalf("old snapshot should be pruned after a run: %v", keys)
 	}
 }
+
+func TestPreMigrationBackupIsSeparateAndNotRestoredByDefault(t *testing.T) {
+	b, _, store := setup(t)
+	ctx := context.Background()
+	b.Now = func() time.Time { return time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC) }
+	if err := b.BackupBeforeMigration(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	// A regular backup in the same second must not overwrite it.
+	if _, err := b.RunOnce(ctx, false); err != nil {
+		t.Fatal(err)
+	}
+	keys, _ := store.List(ctx, "db/")
+	want := []string{
+		"db/daily/2026-10-03.db.gz",
+		"db/hourly/2026-10-04T01-00-00Z.db.gz",
+		"db/pre-migration/2026-10-04T01-00-00Z-v1.db.gz",
+	}
+	if strings.Join(keys, ",") != strings.Join(want, ",") {
+		t.Fatalf("keys = %v\nwant %v", keys, want)
+	}
+	got, err := chooseSnapshot(ctx, store, RestoreOptions{})
+	if err != nil || got != "db/hourly/2026-10-04T01-00-00Z.db.gz" {
+		t.Fatalf("default restore chose %q, %v", got, err)
+	}
+}

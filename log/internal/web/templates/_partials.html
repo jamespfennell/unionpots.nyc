@@ -22,3 +22,62 @@
   <input type="date" name="date" value="{{.Date}}" required>
 </label>
 {{end}}
+
+{{/* Height / width / depth inputs (inches), one row per dimsRow. */}}
+{{define "dims"}}
+<div class="dims">
+  <div class="dims-head" aria-hidden="true"><span>Height</span><span>Width</span><span>Depth</span><span></span></div>
+  {{range .}}
+  <div class="dims-row">
+    {{with .Label}}<div class="dims-label">{{.}}</div>{{end}}
+    <div class="dims-inputs">
+      <input name="h_{{.Key}}" value="{{measure .Dims.H}}" inputmode="decimal" autocomplete="off" aria-label="{{.Label}} height">
+      <input name="w_{{.Key}}" value="{{measure .Dims.W}}" inputmode="decimal" autocomplete="off" aria-label="{{.Label}} width">
+      <input name="d_{{.Key}}" value="{{measure .Dims.D}}" inputmode="decimal" autocomplete="off" aria-label="{{.Label}} depth" data-depth>
+      <label class="pill pill-small" title="Round: depth is the same as width">
+        <input type="checkbox" name="round_{{.Key}}" value="1" class="visually-hidden" data-round{{if .Dims.Round}} checked{{end}}><span>Round</span>
+      </label>
+    </div>
+  </div>
+  {{end}}
+  <p class="dims-hint">Inches: 4.5 or 4 1/2.</p>
+</div>
+{{end}}
+
+{{/* Clay body pills (several can be chosen). Args: Clays, Selected (IDs),
+     AllowNew (adds an "or new" box that creates a clay body on submit). */}}
+{{define "clayPills"}}
+<fieldset class="pills">
+  <legend>Clay <a class="legend-link" href="/clays">edit clays</a></legend>
+  <div class="pill-row">
+    {{range .Clays}}
+    <label class="pill"><input type="checkbox" name="clay" value="{{.ID}}" class="visually-hidden"{{if hasID $.Selected .ID}} checked{{end}}><span>{{.Name}}</span></label>
+    {{end}}
+    {{if .AllowNew}}
+    <label class="pill-custom">
+      {{if .Clays}}<span class="muted">or</span>{{end}}
+      <input name="new_clay" autocomplete="off" placeholder="new clay" aria-label="New clay body">
+    </label>
+    {{else if not .Clays}}
+    <span class="muted">No clay bodies yet.</span>
+    {{end}}
+  </div>
+</fieldset>
+{{end}}
+
+{{/* Glaze boxes: one per glaze, plus an empty one to add another (app.js
+     adds a fresh box as the last one is filled). Names already used are
+     suggested. Args: Glazes, Notes, Names. */}}
+{{define "glazeInputs"}}
+<fieldset class="pills glazes">
+  <legend>Glazes, in the order applied</legend>
+  <div class="stack glaze-list" data-glaze-list>
+    {{range .Glazes}}<input name="glaze" value="{{.}}" list="glaze-names" autocomplete="off" aria-label="Glaze">{{end}}
+    <input name="glaze" list="glaze-names" autocomplete="off" placeholder="{{if .Glazes}}another glaze{{else}}e.g. Celadon{{end}}" aria-label="Glaze">
+  </div>
+  <datalist id="glaze-names">{{range .Names}}<option value="{{.}}">{{end}}</datalist>
+</fieldset>
+<label class="field">How applied (optional)
+  <input name="glaze_notes" value="{{.Notes}}" autocomplete="off" placeholder="e.g. dipped 3 s, rim wiped">
+</label>
+{{end}}

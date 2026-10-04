@@ -49,11 +49,18 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("POST /pieces/{id}", s.handle(s.updatePiece))
 	private.Handle("POST /pieces/{id}/events", s.handle(s.addEvent))
 	private.Handle("POST /pieces/{id}/events/{eid}/delete", s.handle(s.deleteEvent))
+	private.Handle("POST /pieces/{id}/measurements", s.handle(s.updateMeasurements))
+	private.Handle("POST /pieces/{id}/ratings", s.handle(s.updateRatings))
 	private.Handle("POST /pieces/{id}/move", s.handle(s.movePiece))
 	private.Handle("POST /pieces/{id}/delete", s.handle(s.deletePiece))
 	private.Handle("GET /projects/{id}", s.handle(s.project))
 	private.Handle("POST /projects/{id}", s.handle(s.updateProject))
 	private.Handle("POST /projects/{id}/pieces", s.handle(s.addToProject))
+	private.Handle("GET /clays", s.handle(s.clays))
+	private.Handle("POST /clays", s.handle(s.addClay))
+	private.Handle("GET /clays/{id}", s.handle(s.clay))
+	private.Handle("POST /clays/{id}", s.handle(s.updateClay))
+	private.Handle("POST /clays/{id}/delete", s.handle(s.deleteClay))
 	private.Handle("GET /new", s.handle(s.newForm))
 	private.Handle("POST /new", s.handle(s.create))
 	private.Handle("GET /created", s.handle(s.created))
@@ -120,6 +127,9 @@ var funcs = template.FuncMap{
 	"static":     staticURL,
 	"lower":      strings.ToLower,
 	"daysAgo":    daysAgo,
+	"measure":    model.FormatMeasure,
+	"dimsNew":    func() []dimsRow { return []dimsRow{{Key: "new"}} },
+	"hasID":      hasID,
 	"list":       func(xs ...int) []int { return xs },
 	"shortDate":  shortDate,
 	"actions":    func() []model.Action { return model.Actions },
@@ -400,15 +410,76 @@ func (s *Server) piece(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	m, err := s.Store.GetMeasurements(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	allClays, err := s.Store.Clays(r.Context())
+	if err != nil {
+		return err
+	}
+	pieceClays, err := s.Store.PieceClays(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	var clayIDs []int64
+	for _, c := range pieceClays {
+		clayIDs = append(clayIDs, c.ID)
+	}
+	details, err := s.Store.GetDetails(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	glazeNames, err := s.Store.GlazeNames(r.Context())
+	if err != nil {
+		return err
+	}
+	ratings, err := s.Store.GetRatings(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	// Glazes are asked for when glazing is next, and shown in Details once
+	// the piece has been glazed (or has glazes recorded).
+	showGlazes := !details.Glazing.Empty()
+	for _, e := range events {
+		showGlazes = showGlazes || e.Action == model.Glazed
+	}
+	siblings := sameState(proj, p)
+	// The next-step card asks for dimensions when the next step is measured.
+	// One set applies to every included piece; pieces that differ are
+	// recorded one at a time.
+	var nextDims []dimsRow
+	if p.State.Next().Measurable() {
+		nextDims = []dimsRow{{Key: "step"}}
+	}
+	var stepRows []dimsRow
+	for _, st := range measureSteps(events, m) {
+		stepRows = append(stepRows, dimsRow{Key: string(st.Action), Label: st.Action.Label(), Dims: st.Dims})
+	}
 	data := struct {
 		Page
-		Piece       db.Piece
-		Events      []db.Event
-		Project     db.Project
-		ShowProject bool
-		Siblings    []db.Piece // same project and state; an action can apply to them too
-		Undo        *db.Event  // the latest event, if it can be undone (not the only one)
-	}{s.page(r, p.Title()), p, events, proj, len(proj.Pieces) > 1 || proj.Name != "", sameState(proj, p), nil}
+		Piece        db.Piece
+		Events       []db.Event
+		Project      db.Project
+		ShowProject  bool
+		Siblings     []db.Piece // same project and state; an action can apply to them too
+		Undo         *db.Event  // the latest event, if it can be undone (not the only one)
+		NextDims     []dimsRow  // dimension inputs for the next step, if it is measured
+		Measurements db.Measurements
+		StepDims     []dimsRow // the measurements form: one row per measured step
+		Shrinkage    string
+		Clays        []db.Clay // all clay bodies, for the pills
+		ClayIDs      []int64   // the ones this piece is made from
+		Details      db.PieceDetails
+		GlazeNames   []string // every glaze used so far, as suggestions
+		NextGlazes   bool     // the next step is glazing, so the card asks for glazes
+		ShowGlazes   bool
+		Ratings      []ratingRow // shown once the piece is finished (or already rated)
+	}{s.page(r, p.Title()), p, events, proj, len(proj.Pieces) > 1, siblings, nil, nextDims, m, stepRows, shrinkage(m), allClays, clayIDs,
+		details, glazeNames, p.State.Next() == model.Glazed, showGlazes, nil}
+	if p.State == model.StateFinished || ratings != (db.Ratings{}) {
+		data.Ratings = ratingRows(ratings)
+	}
 	if len(events) > 1 {
 		data.Undo = &events[len(events)-1]
 	}
@@ -432,8 +503,39 @@ func (s *Server) updatePiece(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := s.Store.UpdatePiece(r.Context(), id, strings.TrimSpace(r.FormValue("name")), r.FormValue("notes")); err != nil {
+	// The piece page's name field edits its project's name: all names are
+	// project names.
+	p, err := s.Store.GetPiece(r.Context(), id)
+	if err != nil {
 		return err
+	}
+	if err := s.Store.UpdatePieceNotes(r.Context(), id, r.FormValue("notes")); err != nil {
+		return err
+	}
+	if _, ok := r.Form["name"]; ok {
+		if err := s.Store.RenameProject(r.Context(), p.ProjectID, strings.TrimSpace(r.FormValue("name"))); err != nil {
+			return err
+		}
+	}
+	if _, ok := r.Form["form"]; ok {
+		if err := s.Store.SetForm(r.Context(), id, r.FormValue("form")); err != nil {
+			return err
+		}
+	}
+	if r.FormValue("glazes_shown") == "1" {
+		g := db.Glazing{Glazes: r.Form["glaze"], Notes: r.FormValue("glaze_notes")}
+		if err := s.Store.SetGlazing(r.Context(), id, g); err != nil {
+			return err
+		}
+	}
+	if r.FormValue("clays_shown") == "1" {
+		ids, err := s.formClays(r, false)
+		if err != nil {
+			return err
+		}
+		if err := s.Store.SetPieceClays(r.Context(), id, ids); err != nil {
+			return err
+		}
 	}
 	if isAutosave(r) {
 		w.WriteHeader(http.StatusNoContent)
@@ -476,7 +578,16 @@ func (s *Server) addEvent(w http.ResponseWriter, r *http.Request) error {
 			ids = append(ids, sib)
 		}
 	}
-	if err := s.Store.AddEvents(r.Context(), ids, action, date); err != nil {
+	var details db.StepDetails
+	if action.Measurable() {
+		if details.Dims, err = formDims(r, "step"); err != nil {
+			return err
+		}
+	}
+	if action == model.Glazed {
+		details.Glazing = db.Glazing{Glazes: r.Form["glaze"], Notes: r.FormValue("glaze_notes")}
+	}
+	if err := s.Store.AddEvents(r.Context(), ids, action, date, details); err != nil {
 		return err
 	}
 	return redirect(w, r, pieceURL(id))
@@ -573,10 +684,20 @@ func (s *Server) newForm(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	clays, err := s.Store.Clays(r.Context())
+	if err != nil {
+		return err
+	}
+	lastClays, err := s.Store.LastUsedClays(r.Context())
+	if err != nil {
+		return err
+	}
 	data := struct {
 		Page
-		NextID int64
-	}{s.page(r, "New piece"), next}
+		NextID        int64
+		Clays         []db.Clay
+		SelectedClays []int64
+	}{s.page(r, "New piece"), next, clays, lastClays}
 	return s.render(w, http.StatusOK, "new", data)
 }
 
@@ -603,13 +724,29 @@ func (s *Server) createFrom(w http.ResponseWriter, r *http.Request, projectID in
 	if err != nil {
 		return err
 	}
+	clayIDs, err := s.formClays(r, true)
+	if err != nil {
+		return err
+	}
+	weight, err := formWeight(r, "clay_weight")
+	if err != nil {
+		return err
+	}
+	dims, err := formDims(r, "new")
+	if err != nil {
+		return err
+	}
 	ids, err := s.Store.CreatePieces(r.Context(), db.NewPieces{
-		Count:     int(count),
-		StartID:   startID,
-		ProjectID: projectID,
-		Name:      strings.TrimSpace(r.FormValue("name")),
-		Action:    action,
-		Date:      date,
+		Count:      int(count),
+		StartID:    startID,
+		ProjectID:  projectID,
+		Name:       strings.TrimSpace(r.FormValue("name")),
+		Form:       r.FormValue("form"),
+		Action:     action,
+		Date:       date,
+		ClayIDs:    clayIDs,
+		ClayWeight: weight,
+		Dims:       dims,
 	})
 	if err != nil {
 		return err

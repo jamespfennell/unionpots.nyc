@@ -103,6 +103,7 @@ section { margin-top: 2.5rem; }
   text-decoration: none;
 }
 .row:hover { background: var(--hover); }
+.row-two { grid-template-columns: 1fr auto; }
 .pid { font-weight: 600; }
 .row-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-main .name + .ago { margin-left: 0.5rem; }
@@ -236,10 +237,37 @@ details.disclosure > summary::before { content: "›"; display: inline-block; tr
 details.disclosure[open] > summary::before { transform: rotate(90deg); }
 details.disclosure .hint { color: var(--muted); font-size: 0.875rem; margin: -0.25rem 0 0.75rem; }
 
+/* Height / width / depth inputs. */
+.dims { display: flex; flex-direction: column; gap: 0.5rem; }
+.dims-head, .dims-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.dims-head { font-size: 0.8rem; color: var(--muted); }
+.dims-label + .dims-inputs { margin-top: 0.25rem; }
+.dims-label { font-size: 0.875rem; }
+.dims-inputs input[inputmode] { text-align: center; }
+.dims-inputs [data-depth]:disabled { visibility: hidden; }
+.dims-hint { font-size: 0.8rem; color: var(--muted); margin: 0; }
+.pill-small span { min-height: var(--tap); padding: 0 0.75rem; font-size: 0.875rem; }
+.field-short input { max-width: 8rem; }
+.field-short input[type="date"] { max-width: 12rem; }
+details.disclosure.inline { margin-top: 0; }
+.next-step-body { display: flex; flex-direction: column; gap: 1rem; }
+
+/* A small link beside a field label, e.g. "edit clays". */
+.legend-link { margin-left: 0.5rem; font-size: 0.875rem; }
+.pill-custom input[name="new_clay"] { width: 9rem; min-height: 40px; border-radius: 999px; padding: 0 1rem; }
+
+.glaze-list { gap: 0.5rem; }
+
 /* --- misc pages --- */
 
 .page-form { margin-top: 1.5rem; }
 .stack > details.disclosure { margin-top: 0; }
+.stack > details.disclosure + details.disclosure { margin-top: -0.75rem; }
 .follow { margin-top: 0.75rem; }
 
 

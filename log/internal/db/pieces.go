@@ -28,7 +28,6 @@ type Store struct {
 type Piece struct {
 	ID        int64
 	ProjectID int64
-	Name      string
 	Notes     string
 	State     model.State
 	StateDate string // date of the latest event, when it entered its state
@@ -41,17 +40,13 @@ type Piece struct {
 	UpdatedAt    string
 }
 
-// Label names the piece by its project: "Set of 4 bowls (2/4)". A piece on
-// its own falls back to its own name, so it reads e.g. "Sculpture".
+// Label names the piece by its project: "Set of 4 bowls (2/4)", or just
+// "Sculpture" for a piece on its own. All names are project names.
 func (p Piece) Label() string {
-	name := p.ProjectName
-	if name == "" && p.ProjectSize <= 1 {
-		name = p.Name
-	}
 	if p.ProjectSize > 1 {
-		return strings.TrimSpace(fmt.Sprintf("%s (%d/%d)", name, p.ProjectIndex, p.ProjectSize))
+		return strings.TrimSpace(fmt.Sprintf("%s (%d/%d)", p.ProjectName, p.ProjectIndex, p.ProjectSize))
 	}
-	return name
+	return p.ProjectName
 }
 
 // Title is "#121" or "#121 · Set of 4 bowls (2/4)".
@@ -106,9 +101,15 @@ type NewPieces struct {
 	Count     int
 	StartID   int64        // 0 = allocate from the sequence; otherwise consecutive explicit IDs (backfill)
 	ProjectID int64        // 0 = create a new project
-	Name      string       // piece name if Count == 1 and new project, else project name
+	Name      string       // name of the new project; ignored when adding to an existing one
 	Action    model.Action // how the pieces start, e.g. thrown
 	Date      string
+
+	// Optional details at creation, applied to every piece.
+	Form       string
+	ClayIDs    []int64
+	ClayWeight float64
+	Dims       model.Dims
 }
 
 func (s *Store) NextPieceID(ctx context.Context) (int64, error) {
@@ -157,17 +158,10 @@ func (s *Store) CreatePieces(ctx context.Context, np NewPieces) ([]int64, error)
 		}
 
 		projectID := np.ProjectID
-		pieceName := ""
 		if projectID == 0 {
-			projectName := ""
-			if np.Count == 1 {
-				pieceName = np.Name
-			} else {
-				projectName = np.Name
-			}
 			res, err := tx.ExecContext(ctx,
 				"INSERT INTO projects (name, created_at, updated_at) VALUES (?, ?, ?)",
-				nullIfEmpty(projectName), ts, ts)
+				nullIfEmpty(np.Name), ts, ts)
 			if err != nil {
 				return nil, err
 			}
@@ -175,7 +169,6 @@ func (s *Store) CreatePieces(ctx context.Context, np NewPieces) ([]int64, error)
 				return nil, err
 			}
 		} else {
-			pieceName = np.Name
 			var exists bool
 			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)", projectID).Scan(&exists); err != nil {
 				return nil, err
@@ -187,13 +180,29 @@ func (s *Store) CreatePieces(ctx context.Context, np NewPieces) ([]int64, error)
 
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO pieces (id, project_id, name, state, created_at, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?)`,
-				id, projectID, nullIfEmpty(pieceName), np.Action.Result(), ts, ts); err != nil {
+				`INSERT INTO pieces (id, project_id, state, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+				id, projectID, np.Action.Result(), ts, ts); err != nil {
 				return nil, err
 			}
 			if err := insertEvent(ctx, tx, id, np.Action, np.Date, ts); err != nil {
 				return nil, err
+			}
+			if err := setPieceClays(ctx, tx, id, np.ClayIDs); err != nil {
+				return nil, err
+			}
+			if err := setForm(ctx, tx, id, np.Form); err != nil {
+				return nil, err
+			}
+			if np.ClayWeight != 0 {
+				if err := setMeta(ctx, tx, id, clayWeightKey, np.ClayWeight, false); err != nil {
+					return nil, err
+				}
+			}
+			if np.Action.Measurable() && !np.Dims.Empty() {
+				if err := setMeta(ctx, tx, id, dimsKey(np.Action), np.Dims, false); err != nil {
+					return nil, err
+				}
 			}
 		}
 		return ids, nil
@@ -225,7 +234,7 @@ func refreshPiece(ctx context.Context, tx *sql.Tx, pieceID int64) error {
 	return err
 }
 
-const pieceColumns = `p.id, p.project_id, COALESCE(p.name, ''), p.notes, p.state,
+const pieceColumns = `p.id, p.project_id, p.notes, p.state,
 	p.public, p.created_at, p.updated_at,
 	COALESCE((SELECT occurred_on FROM events e WHERE e.piece_id = p.id
 	          ORDER BY occurred_on DESC, id DESC LIMIT 1), ''),
@@ -235,7 +244,7 @@ const pieceColumns = `p.id, p.project_id, COALESCE(p.name, ''), p.notes, p.state
 
 func scanPiece(row interface{ Scan(...any) error }) (Piece, error) {
 	var p Piece
-	err := row.Scan(&p.ID, &p.ProjectID, &p.Name, &p.Notes, &p.State,
+	err := row.Scan(&p.ID, &p.ProjectID, &p.Notes, &p.State,
 		&p.Public, &p.CreatedAt, &p.UpdatedAt, &p.StateDate,
 		&p.ProjectName, &p.ProjectSize, &p.ProjectIndex)
 	return p, err
@@ -290,8 +299,16 @@ func (s *Store) PieceEvents(ctx context.Context, pieceID int64) ([]Event, error)
 	return es, rows.Err()
 }
 
-// AddEvents records action happening to each of the pieces on date.
-func (s *Store) AddEvents(ctx context.Context, pieceIDs []int64, action model.Action, date string) error {
+// StepDetails is what can be recorded along with a step, for every piece in
+// it: dimensions (for measured steps) and glazes (when glazing).
+type StepDetails struct {
+	Dims    model.Dims
+	Glazing Glazing
+}
+
+// AddEvents records action happening to each of the pieces on date, along
+// with the step's details.
+func (s *Store) AddEvents(ctx context.Context, pieceIDs []int64, action model.Action, date string, details StepDetails) error {
 	if len(pieceIDs) == 0 {
 		return userErr("no pieces selected")
 	}
@@ -309,6 +326,16 @@ func (s *Store) AddEvents(ctx context.Context, pieceIDs []int64, action model.Ac
 			}
 			if err := refreshPiece(ctx, tx, id); err != nil {
 				return struct{}{}, err
+			}
+			if d := details.Dims; action.Measurable() && !d.Empty() {
+				if err := setMeta(ctx, tx, id, dimsKey(action), d, false); err != nil {
+					return struct{}{}, err
+				}
+			}
+			if g := details.Glazing; action == model.Glazed && !g.Empty() {
+				if err := setGlazing(ctx, tx, id, g); err != nil {
+					return struct{}{}, err
+				}
 			}
 		}
 		return struct{}{}, nil
@@ -338,10 +365,10 @@ func (s *Store) DeleteEvent(ctx context.Context, pieceID, eventID int64) error {
 	return err
 }
 
-func (s *Store) UpdatePiece(ctx context.Context, id int64, name, notes string) error {
+func (s *Store) UpdatePieceNotes(ctx context.Context, id int64, notes string) error {
 	res, err := s.DB.ExecContext(ctx,
-		"UPDATE pieces SET name = ?, notes = ?, updated_at = ? WHERE id = ?",
-		nullIfEmpty(name), notes, now(), id)
+		"UPDATE pieces SET notes = ?, updated_at = ? WHERE id = ?",
+		notes, now(), id)
 	if err != nil {
 		return err
 	}
@@ -425,6 +452,19 @@ func (s *Store) GetProject(ctx context.Context, id int64) (Project, error) {
 	}
 	p.Pieces, err = s.queryPieces(ctx, "WHERE p.project_id = ? ORDER BY p.id", id)
 	return p, err
+}
+
+func (s *Store) RenameProject(ctx context.Context, id int64, name string) error {
+	res, err := s.DB.ExecContext(ctx,
+		"UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
+		nullIfEmpty(name), now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) UpdateProject(ctx context.Context, id int64, name, notes string) error {

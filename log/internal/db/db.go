@@ -87,16 +87,25 @@ func Version(ctx context.Context, sqlDB *sql.DB) (int, error) {
 
 // Migrate applies all pending migrations, each in its own transaction.
 func Migrate(ctx context.Context, sqlDB *sql.DB) error {
+	return migrateTo(ctx, sqlDB, LatestVersion())
+}
+
+// migrateTo applies pending migrations up to and including version.
+func migrateTo(ctx context.Context, sqlDB *sql.DB, version int) error {
 	ms, err := migrations()
 	if err != nil {
 		return err
 	}
+	ms = ms[:version]
 	current, err := Version(ctx, sqlDB)
 	if err != nil {
 		return err
 	}
-	if current > len(ms) {
-		return fmt.Errorf("database schema version %d is newer than this binary (%d)", current, len(ms))
+	if current > LatestVersion() {
+		return fmt.Errorf("database schema version %d is newer than this binary (%d)", current, LatestVersion())
+	}
+	if current >= len(ms) {
+		return nil
 	}
 	for _, m := range ms[current:] {
 		tx, err := sqlDB.BeginTx(ctx, nil)

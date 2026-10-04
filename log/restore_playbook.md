@@ -5,88 +5,71 @@ VM or its disk is lost, the database is damaged, or you need to go back to an
 earlier state. Run it once as a drill, so the first real restore isn't the
 first try.
 
-Run everything on the VM, from the directory containing the compose file.
+Everything runs on the VM, from the directory containing the compose file.
+The compose service is `log.unionpots.nyc` and its data lives in `./data`.
 
-## 1. Stop the app
-
-```sh
-docker compose down log
-```
-
-This stops and removes only the log container. The final backup runs on
-shutdown. Plain `docker compose down` would also stop everything else in the
-project (Caddy, the website). On Compose older than v2.20, use
-`docker compose rm -s -f log` instead.
-
-## 2. Move the current data aside
+## The short version
 
 ```sh
-sudo mv /srv/log.unionpots.nyc /srv/log.unionpots.nyc.old
+./restore.sh                      # newest snapshot
+./restore.sh -at 2026-10-01       # newest snapshot on or before a date
+./restore.sh -key db/hourly/2026-10-03T14-00-00Z.db.gz
 ```
 
-Never delete it first: it's your fallback if the restore goes wrong.
-`restore` refuses to run while `log.db` exists, so this step is required.
+[`restore.sh`](restore.sh) asks for confirmation, then does the steps below.
+If the restore fails it puts the old data back and starts the app on it.
 
-## 3. Restore
+## Choosing a snapshot
 
-```sh
-docker compose run --rm log restore
-```
+Stopping the app makes a final backup, so the newest snapshot is the state
+the app was just in. That is what you want for a drill or a damaged
+database: a damaged database fails the integrity check and isn't uploaded,
+so the newest snapshot is still the last good one.
 
-This uses the service's image, environment and volume. It downloads the
-newest snapshot, checks its integrity, writes `/srv/log.unionpots.nyc/log.db`,
-then downloads all photos.
-
-To restore an older snapshot instead:
-
-```sh
-docker compose run --rm log restore -at 2026-10-01      # newest on or before a date
-docker compose run --rm log restore -key db/hourly/2026-10-03T14-00-00Z.db.gz
-```
-
-To see which snapshots exist (hourly for the last 7 days, plus one per day
-forever):
+**To go back in time** (e.g. to undo a mistake), pass `-at` or `-key`.
+`-at` with *today's* date also matches the backup just made, so to rewind to
+earlier today use `-key`. To list the snapshots (hourly for the last 7 days,
+plus one per day forever):
 
 ```sh
 aws s3 ls --endpoint-url https://nyc3.digitaloceanspaces.com \
   s3://unionpots-log/db/ --recursive
 ```
 
-## 4. Start the app
+## What the script does
 
-```sh
-docker compose up -d log
-```
-
-Use `up -d`, not `start`: `down` removed the container, and `up` recreates
-it.
-
-## 5. Check
-
-```sh
-docker compose logs log
-```
-
-The logs should show `listening`. Then open https://log.unionpots.nyc and
-check a recent piece. If it all looks right, delete the old data:
-
-```sh
-sudo rm -rf /srv/log.unionpots.nyc.old
-```
+1. **Stop the app:** `docker compose down log.unionpots.nyc`. This stops and
+   removes only this service, not the rest of the project. (Compose older
+   than v2.20: `docker compose rm -s -f log.unionpots.nyc`.)
+2. **Move the current data aside:** `./data` becomes
+   `./data.old.<timestamp>`. Never delete it first: it's the fallback.
+   `restore` refuses to run while `log.db` exists, so this step is required.
+3. **Restore:** `docker compose run --rm log.unionpots.nyc restore [-at …|-key …]`.
+   This uses the service's image, environment and volume. It downloads the
+   snapshot, checks its integrity, writes `./data/log.db`, then downloads all
+   photos.
+4. **Start the app:** `docker compose up -d log.unionpots.nyc`. Use `up -d`,
+   not `start`, because `down` removed the container.
+5. **Check:** the logs should show `listening`. Open
+   https://log.unionpots.nyc and check a recent piece, then delete the old
+   copy: `sudo rm -rf ./data.old.<timestamp>`. The files were written by the
+   container as root, so this may need `sudo`.
 
 ## If something goes wrong
 
-- **The restore fails:** nothing has been lost. Put the old data back and
-  start again:
-
-  ```sh
-  sudo rm -rf /srv/log.unionpots.nyc
-  sudo mv /srv/log.unionpots.nyc.old /srv/log.unionpots.nyc
-  docker compose up -d log
-  ```
-
-- **The app won't start and says "backups exist … run `log restore`":** the
-  data directory is empty or missing (e.g. a wrong volume path). Fix the
-  path, or do step 3.
+- **The restore fails:** the script puts the old data back and starts the
+  app on it. Nothing has been lost. Try an earlier snapshot.
 - **"integrity check failed":** that snapshot is damaged. Restore an earlier
   one with `-at` or `-key`.
+- **The app won't start and says "backups exist … run `log restore`":** the
+  data directory is empty or missing (e.g. a wrong volume path in the compose
+  file). Fix the path, or run the restore.
+- **Doing it by hand:** the steps above, in order.
+
+  To undo a restore you don't want:
+
+  ```sh
+  docker compose down log.unionpots.nyc
+  sudo rm -rf ./data && mv ./data.old.<timestamp> ./data
+  docker compose up -d log.unionpots.nyc
+  ```
