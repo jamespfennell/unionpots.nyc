@@ -89,3 +89,36 @@
 </div>
 {{end}}
 {{end}}
+
+{{/* Photos of a piece: thumbnails (tap for the large copy) and an upload
+     button. The script uploads each chosen photo and swaps in this section
+     again; without it the form posts and the page reloads. */}}
+{{define "photos"}}
+<section class="photos" id="photos" data-photos>
+  <h2>Photos <span class="save-status" data-photo-status aria-live="polite"></span></h2>
+  {{if .Photos}}
+  <ul class="photo-grid">
+    {{range .Photos}}
+    <li style="--aspect: {{.Aspect}}">
+      <a href="/photos/{{.SHA256}}_1600.jpg" hx-boost="false"><img src="/photos/{{.SHA256}}_600.jpg" width="{{.Width}}" height="{{.Height}}" alt="Photo of #{{$.PieceID}}" loading="lazy"></a>
+      {{if $.Edit}}
+      <form method="post" action="/pieces/{{$.PieceID}}/photos/{{.ID}}/delete?edit=1"
+            hx-post="/pieces/{{$.PieceID}}/photos/{{.ID}}/delete?edit=1" hx-target="closest section" hx-swap="outerHTML"
+            hx-confirm="Remove this photo?">
+        <button class="link-button danger" type="submit">Remove</button>
+      </form>
+      {{end}}
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+  <form method="post" action="/pieces/{{.PieceID}}/photos{{if .Edit}}?edit=1{{end}}" enctype="multipart/form-data"
+        hx-boost="false" data-photo-upload>
+    <label class="button photo-add">
+      Add photos
+      <input type="file" name="photos" accept="image/*" multiple>
+    </label>
+    <noscript><button class="button" type="submit">Upload</button></noscript>
+  </form>
+</section>
+{{end}}

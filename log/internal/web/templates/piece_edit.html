@@ -25,6 +25,8 @@
   </form>
 </section>
 
+{{template "photos" .Photos}}
+
 <section>
   <h2>Measurements <span class="save-status" data-save-status aria-live="polite"></span></h2>
   <form method="post" action="/pieces/{{$p.ID}}/measurements" class="stack" data-autosave

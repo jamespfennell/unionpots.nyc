@@ -73,9 +73,19 @@ type Backuper struct {
 	DataDir string
 	Now     func() time.Time
 	Log     *slog.Logger
+	// Photos, if set, lists photos to copy from PhotoDir on each run.
+	Photos   PhotoSource
+	PhotoDir string
 
-	mu     sync.Mutex // serialises runs and guards status
-	status Status
+	mu       sync.Mutex // serialises runs and guards status
+	status   Status
+	kick     chan struct{}
+	kickOnce sync.Once
+}
+
+func (b *Backuper) kicks() chan struct{} {
+	b.kickOnce.Do(func() { b.kick = make(chan struct{}, 1) })
+	return b.kick
 }
 
 func (b *Backuper) Status() Status {
@@ -87,7 +97,8 @@ func (b *Backuper) Status() Status {
 	return s
 }
 
-// Run backs up immediately and then every interval until ctx is done.
+// Run backs up immediately and then every interval until ctx is done. A
+// Kick uploads new photos straight away.
 func (b *Backuper) Run(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -95,28 +106,31 @@ func (b *Backuper) Run(ctx context.Context, interval time.Duration) {
 		if _, err := b.RunOnce(ctx, false); err != nil && ctx.Err() == nil {
 			b.Log.Error("backup failed", "err", err)
 		}
+	wait:
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-b.kicks():
+			if err := b.SyncPhotos(ctx); err != nil && ctx.Err() == nil {
+				b.Log.Error("photo backup failed", "err", err)
+				b.mu.Lock()
+				b.status.LastError, b.status.LastErrorAt = err.Error(), b.Now()
+				b.mu.Unlock()
+			}
+			goto wait
 		}
 	}
 }
 
-// RunOnce snapshots the database and uploads it unless it is unchanged since
-// the last upload (or force is set), then prunes expired snapshots. It
-// reports whether it uploaded. A pruning failure is logged, not returned: the
-// backup itself still succeeded.
+// RunOnce uploads any new photos, snapshots the database and uploads it
+// unless it is unchanged since the last upload (or force is set), then
+// prunes expired snapshots. It reports whether it uploaded the database. A
+// photo failure doesn't stop the database backup but is returned; a pruning
+// failure is logged, not returned.
 func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	defer func() {
-		if err == nil {
-			if perr := b.prune(ctx); perr != nil {
-				b.Log.Error("pruning old backups failed", "err", perr)
-			}
-		}
-	}()
 	defer func() {
 		if err != nil {
 			b.status.LastError = err.Error()
@@ -126,7 +140,20 @@ func (b *Backuper) RunOnce(ctx context.Context, force bool) (uploaded bool, err 
 			b.status.LastError = ""
 		}
 	}()
+	photoErr := b.syncPhotos(ctx)
+	if photoErr != nil {
+		photoErr = fmt.Errorf("photo backup: %w", photoErr)
+	}
+	uploaded, err = b.backupDB(ctx, force)
+	if err == nil {
+		if perr := b.prune(ctx); perr != nil {
+			b.Log.Error("pruning old backups failed", "err", perr)
+		}
+	}
+	return uploaded, errors.Join(err, photoErr)
+}
 
+func (b *Backuper) backupDB(ctx context.Context, force bool) (bool, error) {
 	snap, err := b.snapshot(ctx)
 	if err != nil {
 		return false, err

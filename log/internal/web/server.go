@@ -23,6 +23,7 @@ import (
 	"unionpots.nyc/log/internal/backup"
 	"unionpots.nyc/log/internal/db"
 	"unionpots.nyc/log/internal/model"
+	"unionpots.nyc/log/internal/photos"
 )
 
 //go:embed templates/*.html
@@ -40,6 +41,10 @@ type Server struct {
 	// LoginMessage, if set, is shown on the login page (e.g. the password of
 	// a local preview). Never set it in production.
 	LoginMessage string
+	// Photos stores photo files; PhotoBackup (nil when backups are off)
+	// copies them to backup storage.
+	Photos      *photos.Store
+	PhotoBackup PhotoBackup
 	// Version describes the running build ("b8e67d8 · built 4 Oct 2026"),
 	// shown at the bottom of the menu.
 	Version string
@@ -77,6 +82,9 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("GET /glazes/{id}", s.handle(s.glaze))
 	private.Handle("POST /glazes/{id}", s.handle(s.renameGlaze))
 	private.Handle("POST /glazes/{id}/delete", s.handle(s.deleteGlaze))
+	private.Handle("POST /pieces/{id}/photos", s.handle(s.addPhotos))
+	private.Handle("POST /pieces/{id}/photos/{pid}/delete", s.handle(s.deletePhoto))
+	private.HandleFunc("GET /photos/{name}", s.photoFile)
 	private.Handle("GET /backups", s.handle(s.backups))
 	private.Handle("GET /new", s.handle(s.newForm))
 	private.Handle("POST /new", s.handle(s.create))
@@ -125,6 +133,17 @@ func (s *Server) handle(f handlerFunc) http.Handler {
 			return
 		}
 		var ue *db.UserError
+		if r.Header.Get("X-Photos") != "" { // the photo uploader shows plain messages
+			if errors.As(err, &ue) {
+				http.Error(w, ue.Msg, http.StatusBadRequest)
+			} else if errors.Is(err, db.ErrNotFound) {
+				http.Error(w, "Not found.", http.StatusNotFound)
+			} else {
+				s.Log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+				http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+			}
+			return
+		}
 		switch {
 		case errors.As(err, &ue):
 			s.renderError(w, r, http.StatusBadRequest, ue.Msg)
@@ -315,9 +334,27 @@ func (s *Server) render(w http.ResponseWriter, status int, name string, data any
 		return err
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Always fresh: Back would otherwise show a stale copy (e.g. without a
+	// photo just added).
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+// renderPartial renders one named template from _partials.html on its own.
+func (s *Server) renderPartial(w http.ResponseWriter, name string, data any) error {
+	var buf bytes.Buffer
+	if err := s.pages["piece"].ExecuteTemplate(&buf, name, data); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+func userErr(format string, args ...any) error {
+	return &db.UserError{Msg: fmt.Sprintf(format, args...)}
 }
 
 func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int, msg string) {

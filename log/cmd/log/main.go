@@ -31,6 +31,7 @@ import (
 
 	"unionpots.nyc/log/internal/backup"
 	"unionpots.nyc/log/internal/db"
+	"unionpots.nyc/log/internal/photos"
 	"unionpots.nyc/log/internal/web"
 )
 
@@ -169,7 +170,8 @@ func serve(logger *slog.Logger, args []string) error {
 
 	var backuper *backup.Backuper
 	if c.Store != nil {
-		backuper = &backup.Backuper{DB: sqlDB, Store: c.Store, DataDir: c.DataDir, Now: time.Now, Log: logger}
+		backuper = &backup.Backuper{DB: sqlDB, Store: c.Store, DataDir: c.DataDir, Now: time.Now, Log: logger,
+			Photos: &db.Store{DB: sqlDB}, PhotoDir: c.photoDir()}
 	}
 	version, err := db.Version(ctx, sqlDB)
 	if err != nil {
@@ -189,9 +191,11 @@ func serve(logger *slog.Logger, args []string) error {
 	var snapshots func(context.Context) ([]backup.Snapshot, error)
 	backupCtx, stopBackups := context.WithCancel(context.Background())
 	backupsDone := make(chan struct{})
+	var photoBackup web.PhotoBackup
 	if backuper != nil {
 		status = backuper.Status
 		snapshots = backuper.Snapshots
+		photoBackup = backuper
 		go func() {
 			defer close(backupsDone)
 			backuper.Run(backupCtx, backup.Interval)
@@ -209,6 +213,8 @@ func serve(logger *slog.Logger, args []string) error {
 		},
 		Backup:       status,
 		Snapshots:    snapshots,
+		Photos:       &photos.Store{Dir: c.photoDir()},
+		PhotoBackup:  photoBackup,
 		LoginMessage: *loginMessage,
 		Version:      versionText(),
 		Now:          time.Now,
@@ -268,7 +274,8 @@ func backupNow(logger *slog.Logger) error {
 		return err
 	}
 	defer sqlDB.Close()
-	b := &backup.Backuper{DB: sqlDB, Store: c.Store, DataDir: c.DataDir, Now: time.Now, Log: logger}
+	b := &backup.Backuper{DB: sqlDB, Store: c.Store, DataDir: c.DataDir, Now: time.Now, Log: logger,
+		Photos: &db.Store{DB: sqlDB}, PhotoDir: c.photoDir()}
 	uploaded, err := b.RunOnce(context.Background(), false)
 	if err != nil {
 		return err

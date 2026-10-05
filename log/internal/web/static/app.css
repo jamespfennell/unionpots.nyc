@@ -332,3 +332,23 @@ details.disclosure.inline { margin-top: 0; }
 .login { max-width: 360px; margin: 18vh auto 0; }
 .login h1 { margin-bottom: 1.5rem; }
 .login-message { background: var(--hover); border-radius: var(--radius); padding: 0.75rem 1rem; margin: 0; }
+
+/* Photos: justified rows. Each photo keeps its own shape (no cropping, no
+   padding); a row's photos share one height and together fill the width.
+   A photo's share of the row is its aspect ratio (--aspect). The last row
+   isn't stretched; "Add photos" is a button that opens
+   the picker (the file input itself is invisible on top of it). */
+.photo-grid { --row: 9rem; list-style: none; padding: 0; margin: 0 0 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+@media (max-width: 30rem) { .photo-grid { --row: 7rem; } }
+.photo-grid::after { content: ""; flex: 1000 1 0; }
+/* A photo never grows past 1.6× the row height, so one left alone on a
+   row stays modest. */
+.photo-grid li { display: flex; flex-direction: column; gap: 0.25rem; flex: var(--aspect) 1 calc(var(--aspect) * var(--row)); max-width: calc(var(--aspect) * var(--row) * 1.6); min-width: 0; }
+.photo-grid a { display: block; }
+.photo-grid img { display: block; width: 100%; height: auto; border-radius: 4px; background: var(--hover); }
+.photo-grid form { margin: 0; }
+.link-button.danger { color: var(--danger); }
+.photo-add { position: relative; overflow: hidden; }
+.photo-add input { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 0; }
+.photo-add:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
+.photo-add.busy { opacity: 0.6; pointer-events: none; }

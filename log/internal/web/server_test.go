@@ -19,12 +19,14 @@ import (
 	"unionpots.nyc/log/internal/backup"
 	"unionpots.nyc/log/internal/db"
 	"unionpots.nyc/log/internal/model"
+	"unionpots.nyc/log/internal/photos"
 )
 
 type testApp struct {
 	t      *testing.T
 	store  *db.Store
 	h      http.Handler
+	srv    *Server
 	cookie *http.Cookie
 }
 
@@ -44,10 +46,11 @@ func newApp(t *testing.T) *testApp {
 		Store:  &db.Store{DB: sqlDB, MinPieceID: 120},
 		Auth:   &Auth{PasswordHash: hash, Secret: []byte(strings.Repeat("s", 32)), Now: now},
 		Backup: func() backup.Status { return backup.Status{} },
+		Photos: &photos.Store{Dir: t.TempDir()},
 		Now:    now,
 		Log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	return &testApp{t: t, store: s.Store, h: s.Handler()}
+	return &testApp{t: t, store: s.Store, h: s.Handler(), srv: s}
 }
 
 func (a *testApp) do(method, target string, form url.Values) *httptest.ResponseRecorder {

@@ -30,6 +30,7 @@ type piecePage struct {
 	Details      db.PieceDetails
 	GlazeNames   []string // known glazes, recognised in glaze text and suggested while typing
 	ShowGlazes   bool     // the edit page offers the glaze text once the piece is (being) glazed
+	Photos       photoSection
 }
 
 // fact is one read-only detail: a label and one or more values, optionally
@@ -133,6 +134,10 @@ func (s *Server) loadPiecePage(r *http.Request) (*piecePage, error) {
 		pp.Undo = &events[len(events)-1]
 	}
 	pp.Facts = pieceFacts(events, m, pieceClays, details, glazes)
+	if pp.Photos.Photos, err = s.Store.PiecePhotos(r.Context(), p.ID); err != nil {
+		return pp, err
+	}
+	pp.Photos.PieceID = p.ID
 	return pp, nil
 }
 
@@ -235,5 +240,6 @@ func (s *Server) pieceEdit(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	pp.Title = "Edit " + pp.Piece.Title()
+	pp.Photos.Edit = true
 	return s.render(w, http.StatusOK, "piece_edit", pp)
 }

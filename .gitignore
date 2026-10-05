@@ -36,3 +36,4 @@ go.work.sum
 
 # Original photos (web versions live in images/)
 photos/
+!log/internal/photos/

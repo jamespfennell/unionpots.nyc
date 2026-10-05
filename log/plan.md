@@ -147,17 +147,24 @@ migration.)
 
 ### 2.5 Photos
 
-- Attached to a piece or a project. Optional caption and optional state tag
-  (defaulting to the piece's current state at upload — "this is what it looked
-  like when trimmed").
+- Attached to a piece, freeform: not tied to a step, no captions. A
+  **Photos** section sits under Freeform notes on the piece page and on the
+  edit page (which adds **Remove**). Shown in the order added; tap a
+  thumbnail for the large copy.
 - Stored content-addressed by SHA-256. The original is kept untouched
   (private). Derivatives are generated on upload: 400px thumb and 1600px
   display, JPEG, **EXIF orientation applied then all EXIF stripped** (removes
   GPS). Only derivatives are ever served publicly.
-- Upload via `<input type="file" accept="image/jpeg,image/png,image/webp"
-  capture="environment" multiple>`. iOS Safari converts HEIC to JPEG when the
-  accept list excludes HEIC. Anything undecodable is rejected with a clear
-  message. Each photo has a `public` flag (default false).
+- "Add photos" is `<input type="file" accept="image/*" multiple>` (camera
+  or library, several at once). The script uploads each chosen photo on its
+  own request with "Uploading 2 of 3…" beside the heading; without script
+  the form posts them together (at most 10). iOS converts HEIC to JPEG on
+  upload. Anything undecodable is rejected with a clear message; at most
+  25 MB per photo. Photos are processed one at a time (a 36 MP photo takes
+  ~150 MB to decode). A photo can belong to only one piece.
+- Served only to a logged-in user, from `/photos/<sha>_600.jpg` (thumbnail, whole photo, not cropped) and
+  `_1600.jpg`, cached for good (names are content hashes). Originals are
+  never served. Each photo has a `public` flag (default false) for v2.
 
 ## 3. Database schema (SQLite)
 
@@ -371,7 +378,7 @@ log/
 ```
 /data/log.db (+ -wal, -shm)
 /data/photos/originals/ab/abcdef….jpg
-/data/photos/derived/ab/abcdef…_400.jpg
+/data/photos/derived/ab/abcdef…_600.jpg
 /data/photos/derived/ab/abcdef…_1600.jpg
 ```
 
@@ -462,11 +469,13 @@ Local development uses `LOG_BACKUPS=off`, so production can never be
 unbacked-up by accident.
 
 **Photos:**
-- Photo files are immutable and content-addressed. After ingest, a background
-  goroutine uploads the original and its derivatives to
-  `s3://<bucket>/photos/...` and sets `backed_up_at`.
-- On startup and hourly, it retries any photo with `backed_up_at IS NULL`.
-- Spaces bucket versioning is on, so an accidental delete is recoverable.
+- Photo files are immutable and content-addressed. Right after an upload the
+  backup loop copies the original and its derivatives to
+  `s3://<bucket>/<prefix>/photos/...` and sets `backed_up_at`.
+- Every backup run (10 minutes) retries any photo with `backed_up_at IS
+  NULL`; a failure shows in the backups banner like a DB failure.
+- Removing a photo deletes its files on disk and in the bucket. A restore of
+  an older DB snapshot can therefore list a photo whose files are gone.
 
 **Export:** `log export out.zip` writes
 `data.json` (every project, piece, event, metadata row and clay body) plus `photos/originals/`. It's a
@@ -610,9 +619,9 @@ inheritance, no ownership; every piece holds its own values)
   the piece page once finished.
 
 **M3 — Photos**
-- Upload (multi), derivatives, EXIF handling, gallery on piece/project
-  pages.
-- Spaces mirror with retry.
+- ✓ Upload (several at once), derivatives, EXIF orientation and stripping,
+  Photos section on the piece and edit pages, Remove.
+- ✓ Spaces mirror with retry; restore brings photos back.
 
 **M4 — Search, library, export**
 - Search page, clay/glaze library with shrinkage stats.
@@ -634,6 +643,14 @@ inheritance, no ownership; every piece holds its own values)
   structured JSON. That becomes a review form pre-filled with proposed
   pieces/fields, and nothing is saved until confirmed. Probably first as a
   desktop CLI for the historical notebooks.
+
+**Idea — demo mode** (`serve -demo`), so the demo can keep showing its
+password safely:
+- photo uploads turned off ("Photos are disabled in the demo"); seeded
+  sample photos still show;
+- public pages never exist, whatever the settings;
+- the database resets to sample data on a schedule (e.g. daily);
+- backups off.
 
 **Later / explicitly out of scope for now:**
 - Firing details (cone, atmosphere, kiln).

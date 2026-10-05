@@ -267,6 +267,65 @@
     if (t.matches && t.matches('input[type="radio"][name="action"]')) syncChoice(t.form);
   });
 
+  // Photos: each chosen photo is uploaded on its own request (phone photos
+  // are large), with progress next to the heading. Each response is the
+  // updated photos section, swapped in once all are done.
+  document.addEventListener("change", function (e) {
+    var input = e.target;
+    var form = input.matches && input.matches('input[type="file"]') && input.closest("form[data-photo-upload]");
+    if (!form || !input.files.length) return;
+    var files = Array.prototype.slice.call(input.files);
+    var section = form.closest("[data-photos]");
+    var status = section.querySelector("[data-photo-status]");
+    var label = form.querySelector(".photo-add");
+    label.classList.add("busy");
+    input.disabled = true;
+    var html = null, failed = [];
+    function say(text, state) {
+      status.textContent = text;
+      if (state) status.dataset.state = state; else delete status.dataset.state;
+    }
+    function next(i) {
+      if (i === files.length) return finish();
+      say(files.length > 1 ? "Uploading " + (i + 1) + " of " + files.length + "…" : "Uploading…");
+      var body = new FormData();
+      body.append("photos", files[i]);
+      fetch(form.action, { method: "POST", headers: { "X-Photos": "1" }, body: body })
+        .then(function (r) {
+          return r.text().then(function (t) {
+            if (r.ok) html = t;
+            else failed.push(r.status === 400 ? t.trim() : files[i].name + ": couldn’t upload.");
+          });
+        })
+        .catch(function () { failed.push(files[i].name + ": couldn’t upload. Check your connection."); })
+        .then(function () { next(i + 1); });
+    }
+    function finish() {
+      var target = section;
+      if (html) {
+        var tmp = document.createElement("div");
+        tmp.innerHTML = html.trim();
+        target = tmp.firstElementChild;
+        section.replaceWith(target);
+        if (window.htmx) htmx.process(target);
+      } else {
+        label.classList.remove("busy");
+        input.disabled = false;
+      }
+      input.value = "";
+      var st = target.querySelector("[data-photo-status]");
+      if (failed.length) {
+        st.textContent = failed.join(" ");
+        st.dataset.state = "error";
+      } else {
+        st.textContent = files.length > 1 ? "Added " + files.length + " photos" : "Added";
+        st.dataset.state = "saved";
+        setTimeout(function () { st.textContent = ""; delete st.dataset.state; }, 2500);
+      }
+    }
+    next(0);
+  });
+
   // The menu closes when you tap anywhere else.
   document.addEventListener("click", function (e) {
     document.querySelectorAll("details[data-menu][open]").forEach(function (m) {
