@@ -19,7 +19,7 @@
   <script src="{{static "app.js"}}" defer></script>
 </head>
 <body hx-boost="true">
-  {{if .Banner}}<div class="banner" role="status">{{.Banner}}</div>{{end}}
+  {{range .Banners}}<div class="banner{{if not .Warning}} banner-info{{end}}" role="status">{{.Text}}</div>{{end}}
   {{if .LoggedIn}}
   <header class="top">
     <a class="brand" href="/">Union Pots · Log</a>
@@ -33,6 +33,10 @@
         <hr>
         <a href="/backups">Backups</a>
         <form method="post" action="/logout" hx-boost="false"><button type="submit">Log out</button></form>
+        {{if .LogOutEverywhere}}
+        <form method="post" action="/logout-everywhere" hx-boost="false"
+              onsubmit="return confirm('Log out on every device, including this one?')"><button type="submit">Log out everywhere</button></form>
+        {{end}}
         {{with .Version}}<p class="menu-version">Version {{.}}</p>{{end}}
       </nav>
     </details>

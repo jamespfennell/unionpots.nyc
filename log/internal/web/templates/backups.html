@@ -29,7 +29,9 @@
   </dl>
   {{end}}
 </section>
+{{else if .Status.Problem}}
+<p class="error">Backups are misconfigured ({{.Status.Problem}}), so nothing is being copied off this machine.</p>
 {{else}}
-<p class="error">Backups are turned off (<code>LOG_BACKUPS=off</code>), so nothing is being copied off this machine.</p>
+<p class="error">Backups are off: no backup storage is configured (the <code>-spaces-…</code> flags), so nothing is being copied off this machine.</p>
 {{end}}
 {{end}}

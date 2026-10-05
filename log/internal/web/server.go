@@ -38,9 +38,14 @@ type Server struct {
 	Backup func() backup.Status
 	// Snapshots lists the stored backups (nil when backups are off).
 	Snapshots func(context.Context) ([]backup.Snapshot, error)
-	// LoginMessage, if set, is shown on the login page (e.g. the password of
-	// a local preview). Never set it in production.
+	// LoginMessage, if set, is shown on the login page (the demo's password).
 	LoginMessage string
+	// DefaultPassword means no password was configured, so it's the
+	// default one; a banner says so (to a logged-in user).
+	DefaultPassword bool
+	// Demo turns off photo uploads and shows a demo banner instead of the
+	// backup ones.
+	Demo bool
 	// Photos stores photo files; PhotoBackup (nil when backups are off)
 	// copies them to backup storage.
 	Photos      *photos.Store
@@ -96,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /login", s.handle(s.loginForm))
 	mux.Handle("POST /login", s.handle(s.login))
 	mux.Handle("POST /logout", s.handle(s.logout))
+	mux.Handle("POST /logout-everywhere", s.Auth.Require(s.handle(s.logoutEverywhere)))
 	mux.Handle("/", s.Auth.Require(private))
 
 	// Rejects cross-site non-GET requests (CSRF) using Sec-Fetch-Site/Origin.
@@ -307,21 +313,49 @@ type Page struct {
 	Version  string
 	LoggedIn bool
 	Today    string
-	Banner   string
+	Banners  []banner
+	// LogOutEverywhere shows the menu item.
+	LogOutEverywhere bool
+}
+
+// banner is a thin notice across the top of every page. Warnings are red.
+type banner struct {
+	Text    string
+	Warning bool
 }
 
 func (s *Server) page(r *http.Request, title string) Page {
-	p := Page{Title: title, Version: s.Version, LoggedIn: s.Auth.valid(r), Today: model.Today(s.Now())}
-	if p.LoggedIn {
-		st := s.Backup()
-		switch {
-		case !st.Enabled:
-			p.Banner = "Backups disabled"
-		case st.Stale(s.Now()):
-			p.Banner = "Backups failing: last success " + ago(st.LastOK, s.Now())
-		}
+	p := Page{Title: title, Version: s.Version, LoggedIn: s.Auth.valid(r), Today: model.Today(s.Now()),
+		LogOutEverywhere: s.canLogOutEverywhere()}
+	if s.Demo {
+		p.Banners = append(p.Banners, banner{Text: "This is a demo: everything you change is reset every day."})
+		return p
+	}
+	if !p.LoggedIn {
+		return p
+	}
+	if s.DefaultPassword {
+		p.Banners = append(p.Banners, banner{Text: "Using the default password: set one with -password-hash", Warning: true})
+	}
+	st := s.Backup()
+	switch {
+	case st.Problem != "":
+		p.Banners = append(p.Banners, banner{Text: "Backups misconfigured: " + st.Problem, Warning: true})
+	case !st.Enabled:
+		p.Banners = append(p.Banners, banner{Text: "Backups disabled", Warning: true})
+	case st.LastOK.IsZero() && st.LastError != "":
+		p.Banners = append(p.Banners, banner{Text: "Backups not working: " + shorten(st.LastError, 120) + " (see Backups)", Warning: true})
+	case st.Stale(s.Now()):
+		p.Banners = append(p.Banners, banner{Text: "Backups failing: last success " + ago(st.LastOK, s.Now()), Warning: true})
 	}
 	return p
+}
+
+func shorten(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, name string, data any) error {
@@ -449,7 +483,11 @@ func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, status int,
 		Page
 		Next, Error string
 		Message     string
-	}{s.page(r, "Log in"), safeNext(r.FormValue("next")), msg, s.LoginMessage}
+		Notice      string
+	}{s.page(r, "Log in"), safeNext(r.FormValue("next")), msg, s.LoginMessage, ""}
+	if r.URL.Query().Get("out") == "all" {
+		data.Notice = "Logged out on every device."
+	}
 	return s.render(w, status, "login", data)
 }
 
@@ -494,6 +532,23 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) error {
 	s.Auth.ClearSession(w, r)
 	return redirect(w, r, "/login")
 }
+
+// logoutEverywhere logs out every device, this one included, by rotating
+// the session secret.
+func (s *Server) logoutEverywhere(w http.ResponseWriter, r *http.Request) error {
+	if !s.canLogOutEverywhere() {
+		return db.ErrNotFound
+	}
+	if err := s.Auth.LogOutEverywhere(); err != nil {
+		return err
+	}
+	s.Log.Info("logged out every device")
+	s.Auth.ClearSession(w, r)
+	return redirect(w, r, "/login?out=all")
+}
+
+// canLogOutEverywhere: not in the demo, where any visitor could do it.
+func (s *Server) canLogOutEverywhere() bool { return s.Auth.Rotate != nil && !s.Demo }
 
 // --- pages ---
 

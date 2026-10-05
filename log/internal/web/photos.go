@@ -28,6 +28,9 @@ const maxPhotosPerRequest = 10
 // page's script it answers with the updated photos section; otherwise it
 // goes back to the page it came from.
 func (s *Server) addPhotos(w http.ResponseWriter, r *http.Request) error {
+	if s.Demo {
+		return userErr("Photos can’t be added in the demo.")
+	}
 	id, err := pathID(r, "id")
 	if err != nil {
 		return err
@@ -99,6 +102,9 @@ func (s *Server) addPhoto(ctx context.Context, pieceID int64, part *multipart.Pa
 // deletePhoto removes a photo from a piece, from disk and from backup
 // storage.
 func (s *Server) deletePhoto(w http.ResponseWriter, r *http.Request) error {
+	if s.Demo {
+		return userErr("Photos can’t be removed in the demo.")
+	}
 	id, err := pathID(r, "id")
 	if err != nil {
 		return err
@@ -146,6 +152,7 @@ type photoSection struct {
 	PieceID int64
 	Photos  []db.Photo
 	Edit    bool // show Remove buttons
+	Demo    bool // no adding or removing
 }
 
 // photoFile serves a derived (metadata-free) copy. File names are content

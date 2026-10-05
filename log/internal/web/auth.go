@@ -27,11 +27,29 @@ type Auth struct {
 	PasswordHash []byte
 	Secret       []byte
 	Now          func() time.Time
+	// Rotate, if set, replaces the stored secret and returns the new
+	// signing key (for "Log out everywhere").
+	Rotate func() ([]byte, error)
 
+	mu      sync.RWMutex // guards Secret once serving
 	limiter rateLimiter
 }
 
+// LogOutEverywhere invalidates every session by switching to a new secret.
+func (a *Auth) LogOutEverywhere() error {
+	key, err := a.Rotate()
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.Secret = key
+	a.mu.Unlock()
+	return nil
+}
+
 func (a *Auth) sign(expiry int64) string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	m := hmac.New(sha256.New, a.Secret)
 	m.Write([]byte("session:" + strconv.FormatInt(expiry, 10)))
 	return hex.EncodeToString(m.Sum(nil))

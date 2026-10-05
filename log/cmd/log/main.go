@@ -1,13 +1,12 @@
 // Command log runs the Union Pots work log.
 //
 //	log serve          run the web app
-//	                     -min-piece-id N: first automatic piece number
-//	                     -login-message "…": text on the login page (local previews only)
 //	log backup         snapshot the database to backup storage now
 //	log restore        restore the database and photos from backup storage
-//	log hash-password  print a bcrypt hash for LOG_PASSWORD_HASH
+//	log hash-password  print a bcrypt hash for -password-hash
 //
-// Configuration is via environment variables; see README.md.
+// Run `log <command> -h` for its flags. The data directory and backup flags
+// can also go before the command (see storage). See README.md.
 package main
 
 import (
@@ -20,8 +19,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -31,28 +28,49 @@ import (
 
 	"unionpots.nyc/log/internal/backup"
 	"unionpots.nyc/log/internal/db"
+	"unionpots.nyc/log/internal/demo"
 	"unionpots.nyc/log/internal/photos"
 	"unionpots.nyc/log/internal/web"
 )
 
+const usage = `usage: log [storage flags] <command> [flags]
+
+commands:
+  serve          run the web app
+  backup         snapshot the database to backup storage now
+  restore        restore the database and photos from backup storage
+  hash-password  print a bcrypt hash for serve -password-hash
+
+Run "log <command> -h" for a command's flags.
+`
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: log serve|backup|restore|hash-password")
+	st := storage{DataDir: "./data"}
+	global := flag.NewFlagSet("log", flag.ExitOnError)
+	global.Usage = func() {
+		fmt.Fprint(os.Stderr, usage+"\nstorage flags (also accepted after the command):\n")
+		global.PrintDefaults()
+	}
+	st.addFlags(global)
+	global.Parse(os.Args[1:])
+	if global.NArg() < 1 {
+		global.Usage()
 		os.Exit(2)
 	}
 	var err error
-	switch cmd, args := os.Args[1], os.Args[2:]; cmd {
+	switch cmd, args := global.Arg(0), global.Args()[1:]; cmd {
 	case "serve":
-		err = serve(logger, args)
+		err = serve(logger, st, args)
 	case "backup":
-		err = backupNow(logger)
+		err = backupNow(logger, st, args)
 	case "restore":
-		err = restore(logger, args)
+		err = restore(logger, st, args)
 	case "hash-password":
 		err = hashPassword()
 	default:
-		err = fmt.Errorf("unknown command %q", cmd)
+		global.Usage()
+		os.Exit(2)
 	}
 	if err != nil {
 		logger.Error(err.Error())
@@ -60,139 +78,139 @@ func main() {
 	}
 }
 
-type config struct {
-	Addr          string
-	DataDir       string
-	PasswordHash  string
-	SessionSecret string
-	AllowEmptyDB  bool
-	Store         backup.ObjectStore // nil when backups are off
+// DefaultPassword is used when serve is given no -password-hash, and always
+// in demo mode.
+const DefaultPassword = "potter"
+
+type serveOptions struct {
+	storage
+	Addr         string
+	PasswordHash string
+	MinPieceID   int64
+	AllowEmptyDB bool
+	Demo         bool
 }
 
-func (c config) dbPath() string   { return filepath.Join(c.DataDir, "log.db") }
-func (c config) photoDir() string { return filepath.Join(c.DataDir, "photos") }
-
-func loadConfig() (config, error) {
-	c := config{
-		Addr:          envOr("LOG_ADDR", ":8080"),
-		DataDir:       envOr("LOG_DATA_DIR", "./data"),
-		PasswordHash:  os.Getenv("LOG_PASSWORD_HASH"),
-		SessionSecret: os.Getenv("LOG_SESSION_SECRET"),
-		AllowEmptyDB:  os.Getenv("LOG_ALLOW_EMPTY_DB") == "1",
-	}
-	switch {
-	case os.Getenv("LOG_BACKUPS") == "off":
-	case os.Getenv("LOG_BACKUP_DIR") != "":
-		c.Store = backup.DirStore{Root: os.Getenv("LOG_BACKUP_DIR")}
-	default:
-		s3 := backup.S3Config{
-			Endpoint:  os.Getenv("SPACES_ENDPOINT"),
-			Region:    os.Getenv("SPACES_REGION"),
-			Bucket:    os.Getenv("SPACES_BUCKET"),
-			KeyID:     os.Getenv("SPACES_KEY"),
-			SecretKey: os.Getenv("SPACES_SECRET"),
-		}
-		if s3.Endpoint == "" || s3.Region == "" || s3.Bucket == "" || s3.KeyID == "" || s3.SecretKey == "" {
-			return c, errors.New("backups are not configured: set SPACES_ENDPOINT, SPACES_REGION, SPACES_BUCKET, SPACES_KEY and SPACES_SECRET, or LOG_BACKUPS=off to run without backups")
-		}
-		c.Store = backup.NewS3Store(s3)
-	}
-	if c.Store != nil {
-		// Several deployments (e.g. the log and a demo) can share a bucket.
-		c.Store = backup.Prefixed(c.Store, os.Getenv("LOG_BACKUP_PREFIX"))
-	}
-	return c, nil
-}
-
-func envInt64(key string, def int64) int64 {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-			return n
-		}
-		fmt.Fprintf(os.Stderr, "ignoring %s=%q: not a number\n", key, v)
-	}
-	return def
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func serve(logger *slog.Logger, args []string) error {
+func parseServe(st storage, args []string) (serveOptions, error) {
+	o := serveOptions{storage: st}
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	minID := fs.Int64("min-piece-id", envInt64("LOG_MIN_PIECE_ID", 1),
-		"lowest number for automatically numbered pieces (default from $LOG_MIN_PIECE_ID, else 1)")
-	loginMessage := fs.String("login-message", os.Getenv("LOG_LOGIN_MESSAGE"),
-		"text shown on the login page, e.g. a local preview's password (default from $LOG_LOGIN_MESSAGE); never set in production")
+	o.addFlags(fs)
+	fs.StringVar(&o.Addr, "addr", ":8080", "listen address")
+	fs.StringVar(&o.PasswordHash, "password-hash", "", `bcrypt hash of the password, from "log hash-password" (default: the password "`+DefaultPassword+`", with a warning)`)
+	fs.Int64Var(&o.MinPieceID, "min-piece-id", 1, "lowest number given to a new piece automatically")
+	fs.BoolVar(&o.AllowEmptyDB, "allow-empty-db", false, "start with an empty database even though backups exist")
+	fs.BoolVar(&o.Demo, "demo", false, `demo mode: password "`+DefaultPassword+`" shown on the login page, sample data reset daily, no photo uploads; no backups or -password-hash allowed`)
 	fs.Parse(args)
-	if *minID < 1 {
-		return errors.New("-min-piece-id must be at least 1")
+	switch {
+	case fs.NArg() > 0:
+		return o, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	case o.MinPieceID < 1:
+		return o, errors.New("-min-piece-id must be at least 1")
+	case o.Demo && o.anyBackupFlag():
+		return o, errors.New("-demo can't be combined with backup flags: the demo is never backed up")
+	case o.Demo && o.PasswordHash != "":
+		return o, errors.New(`-demo can't be combined with -password-hash: the demo password is always "` + DefaultPassword + `"`)
 	}
-	c, err := loadConfig()
+	if o.PasswordHash != "" {
+		if _, err := bcrypt.Cost([]byte(o.PasswordHash)); err != nil {
+			return o, errors.New(`-password-hash isn't a bcrypt hash (make one with "log hash-password"; quote it, it contains $)`)
+		}
+	}
+	return o, nil
+}
+
+func serve(logger *slog.Logger, st storage, args []string) error {
+	o, err := parseServe(st, args)
 	if err != nil {
 		return err
 	}
-	if c.PasswordHash == "" {
-		return errors.New("LOG_PASSWORD_HASH is not set (generate one with `log hash-password`)")
+	store, problem := o.store()
+	switch {
+	case o.Demo:
+		logger.Info("DEMO MODE: sample data, reset daily; no backups")
+	case problem != "":
+		logger.Warn("BACKUPS ARE MISCONFIGURED, running without them", "problem", problem)
+	case store == nil:
+		logger.Warn("BACKUPS ARE DISABLED: no backup storage configured")
 	}
-	if len(c.SessionSecret) < 32 {
-		return errors.New("LOG_SESSION_SECRET must be at least 32 characters (e.g. `openssl rand -hex 32`)")
+	defaultPassword := o.PasswordHash == ""
+	if defaultPassword {
+		h, err := bcrypt.GenerateFromPassword([]byte(DefaultPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		o.PasswordHash = string(h)
+		if !o.Demo {
+			logger.Warn(`USING THE DEFAULT PASSWORD "` + DefaultPassword + `": set -password-hash`)
+		}
 	}
-	if c.Store == nil {
-		logger.Warn("BACKUPS ARE DISABLED (LOG_BACKUPS=off)")
-	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := os.MkdirAll(c.DataDir, 0o755); err != nil {
+	if err := os.MkdirAll(o.DataDir, 0o755); err != nil {
 		return err
 	}
-	_, statErr := os.Stat(c.dbPath())
+	key, err := sessionKey(o.DataDir, []byte(o.PasswordHash))
+	if err != nil {
+		return err
+	}
+	_, statErr := os.Stat(o.dbPath())
 	dbExists := statErr == nil
-	if !dbExists && c.Store != nil && !c.AllowEmptyDB {
-		has, err := backup.HasBackups(ctx, c.Store)
-		if err != nil {
-			return fmt.Errorf("checking for existing backups: %w", err)
-		}
-		if has {
-			return fmt.Errorf("%s does not exist but backups exist in %s: run `log restore`, or set LOG_ALLOW_EMPTY_DB=1 to start an empty log", c.dbPath(), c.Store)
+	if store != nil && !o.AllowEmptyDB {
+		// Make sure backup storage works. If it doesn't, carry on with a
+		// warning, unless the database is missing: that's when backups
+		// matter most, and starting an empty log would make its (empty)
+		// snapshots the newest ones.
+		checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		has, err := backup.HasBackups(checkCtx, store)
+		cancel()
+		switch {
+		case err != nil && !dbExists:
+			return fmt.Errorf("%s does not exist and backup storage can't be checked for existing backups (%v): fix the backup flags, or pass -allow-empty-db to start an empty log", o.dbPath(), err)
+		case err != nil:
+			logger.Warn("backup storage isn't working; will keep retrying", "err", err)
+		case has && !dbExists:
+			return fmt.Errorf("%s does not exist but backups exist in %s: run `log restore`, or pass -allow-empty-db to start an empty log", o.dbPath(), store)
 		}
 	}
 
-	sqlDB, err := db.Open(c.dbPath())
+	sqlDB, err := db.Open(o.dbPath())
 	if err != nil {
 		return err
 	}
 	defer sqlDB.Close()
 
 	var backuper *backup.Backuper
-	if c.Store != nil {
-		backuper = &backup.Backuper{DB: sqlDB, Store: c.Store, DataDir: c.DataDir, Now: time.Now, Log: logger,
-			Photos: &db.Store{DB: sqlDB}, PhotoDir: c.photoDir()}
+	if store != nil {
+		backuper = &backup.Backuper{DB: sqlDB, Store: store, DataDir: o.DataDir, Now: time.Now, Log: logger,
+			Photos: &db.Store{DB: sqlDB}, PhotoDir: o.photoDir()}
 	}
 	version, err := db.Version(ctx, sqlDB)
 	if err != nil {
 		return err
 	}
 	if dbExists && version < db.LatestVersion() && backuper != nil {
+		// Never change the schema without a copy of the data as it was.
 		logger.Info("backing up before migrating", "from", version, "to", db.LatestVersion())
 		if err := backuper.BackupBeforeMigration(ctx, version); err != nil {
-			return fmt.Errorf("pre-migration backup failed: %w", err)
+			return fmt.Errorf("pre-migration backup failed, so the database was not migrated: %w", err)
 		}
 	}
 	if err := db.Migrate(ctx, sqlDB); err != nil {
 		return err
 	}
 
-	status := func() backup.Status { return backup.Status{} }
-	var snapshots func(context.Context) ([]backup.Snapshot, error)
+	pieces := &db.Store{DB: sqlDB, MinPieceID: o.MinPieceID}
+	files := &photos.Store{Dir: o.photoDir()}
 	backupCtx, stopBackups := context.WithCancel(context.Background())
+	defer stopBackups()
 	backupsDone := make(chan struct{})
+	status := func() backup.Status { return backup.Status{Problem: problem} }
+	var snapshots func(context.Context) ([]backup.Snapshot, error)
 	var photoBackup web.PhotoBackup
-	if backuper != nil {
+	switch {
+	case backuper != nil:
 		status = backuper.Status
 		snapshots = backuper.Snapshots
 		photoBackup = backuper
@@ -200,28 +218,48 @@ func serve(logger *slog.Logger, args []string) error {
 			defer close(backupsDone)
 			backuper.Run(backupCtx, backup.Interval)
 		}()
-	} else {
+	case o.Demo:
+		if err := demo.Reset(ctx, pieces, files, time.Now()); err != nil {
+			return fmt.Errorf("loading the demo data: %w", err)
+		}
+		go func() {
+			defer close(backupsDone)
+			t := time.NewTicker(demo.ResetEvery)
+			defer t.Stop()
+			for {
+				select {
+				case <-backupCtx.Done():
+					return
+				case <-t.C:
+					if err := demo.Reset(backupCtx, pieces, files, time.Now()); err != nil {
+						logger.Error("resetting the demo data", "err", err)
+					}
+				}
+			}
+		}()
+	default:
 		close(backupsDone)
 	}
 
 	srv := &web.Server{
-		Store: &db.Store{DB: sqlDB, MinPieceID: *minID},
-		Auth: &web.Auth{
-			PasswordHash: []byte(c.PasswordHash),
-			Secret:       []byte(c.SessionSecret),
-			Now:          time.Now,
-		},
-		Backup:       status,
-		Snapshots:    snapshots,
-		Photos:       &photos.Store{Dir: c.photoDir()},
-		PhotoBackup:  photoBackup,
-		LoginMessage: *loginMessage,
-		Version:      versionText(),
-		Now:          time.Now,
-		Log:          logger,
+		Store: pieces,
+		Auth: &web.Auth{PasswordHash: []byte(o.PasswordHash), Secret: key, Now: time.Now,
+			Rotate: func() ([]byte, error) { return rotateSessionKey(o.DataDir, []byte(o.PasswordHash)) }},
+		Backup:          status,
+		Snapshots:       snapshots,
+		Photos:          files,
+		PhotoBackup:     photoBackup,
+		DefaultPassword: defaultPassword && !o.Demo,
+		Demo:            o.Demo,
+		Version:         versionText(),
+		Now:             time.Now,
+		Log:             logger,
+	}
+	if o.Demo {
+		srv.LoginMessage = "This is a demo. The password is “" + DefaultPassword + "”."
 	}
 	httpServer := &http.Server{
-		Addr:              c.Addr,
+		Addr:              o.Addr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       2 * time.Minute, // photo uploads on slow connections
@@ -230,7 +268,7 @@ func serve(logger *slog.Logger, args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", c.Addr, "data", c.DataDir, "min_piece_id", *minID, "version", versionText())
+		logger.Info("listening", "addr", o.Addr, "data", o.DataDir, "min_piece_id", o.MinPieceID, "demo", o.Demo, "version", versionText())
 		errc <- httpServer.ListenAndServe()
 	}()
 
@@ -258,24 +296,24 @@ func serve(logger *slog.Logger, args []string) error {
 	return nil
 }
 
-func backupNow(logger *slog.Logger) error {
-	c, err := loadConfig()
+func backupNow(logger *slog.Logger, st storage, args []string) error {
+	fs := flag.NewFlagSet("backup", flag.ExitOnError)
+	st.addFlags(fs)
+	fs.Parse(args)
+	store, err := st.requireStore()
 	if err != nil {
 		return err
 	}
-	if c.Store == nil {
-		return errors.New("backups are disabled (LOG_BACKUPS=off)")
-	}
-	if _, err := os.Stat(c.dbPath()); err != nil {
+	if _, err := os.Stat(st.dbPath()); err != nil {
 		return err
 	}
-	sqlDB, err := db.Open(c.dbPath())
+	sqlDB, err := db.Open(st.dbPath())
 	if err != nil {
 		return err
 	}
 	defer sqlDB.Close()
-	b := &backup.Backuper{DB: sqlDB, Store: c.Store, DataDir: c.DataDir, Now: time.Now, Log: logger,
-		Photos: &db.Store{DB: sqlDB}, PhotoDir: c.photoDir()}
+	b := &backup.Backuper{DB: sqlDB, Store: store, DataDir: st.DataDir, Now: time.Now, Log: logger,
+		Photos: &db.Store{DB: sqlDB}, PhotoDir: st.photoDir()}
 	uploaded, err := b.RunOnce(context.Background(), false)
 	if err != nil {
 		return err
@@ -286,24 +324,22 @@ func backupNow(logger *slog.Logger) error {
 	return nil
 }
 
-func restore(logger *slog.Logger, args []string) error {
+func restore(logger *slog.Logger, st storage, args []string) error {
 	fs := flag.NewFlagSet("restore", flag.ExitOnError)
+	st.addFlags(fs)
 	at := fs.String("at", "", "restore the newest snapshot taken on or before this date (YYYY-MM-DD)")
 	key := fs.String("key", "", "restore this exact snapshot key, e.g. db/snapshots/2026-10-03T14-00-00Z.db.gz")
 	fs.Parse(args)
-	c, err := loadConfig()
+	store, err := st.requireStore()
 	if err != nil {
 		return err
 	}
-	if c.Store == nil {
-		return errors.New("backups are disabled (LOG_BACKUPS=off); nothing to restore from")
-	}
-	restored, err := backup.Restore(context.Background(), c.Store, c.dbPath(), c.photoDir(),
+	restored, err := backup.Restore(context.Background(), store, st.dbPath(), st.photoDir(),
 		backup.RestoreOptions{Key: *key, At: *at}, logger)
 	if err != nil {
 		return err
 	}
-	logger.Info("restore complete", "snapshot", restored, "db", c.dbPath())
+	logger.Info("restore complete", "snapshot", restored, "db", st.dbPath())
 	return nil
 }
 

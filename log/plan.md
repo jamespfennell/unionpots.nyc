@@ -37,7 +37,7 @@ document is the source of truth for decisions made so far.
   - New pieces get the next number from a monotonic counter (`id_sequence`), so
     deleting #130 never causes #130 to be handed out again.
   - When backfilling history, an explicit ID can be entered if unused.
-  - Automatic numbering starts at `-min-piece-id` / `LOG_MIN_PIECE_ID`
+  - Automatic numbering starts at `serve -min-piece-id`
     (120 in production, so the first piece logged in the app is #120;
     default 1). It's a floor: the stored counter only moves forward, so
     numbers are never reused. Historical pieces (#1–#119) are backfilled
@@ -353,8 +353,13 @@ log/
 
 ### 5.3 Auth
 
-- Config: `LOG_PASSWORD_HASH` (bcrypt, generated with `log hash-password`) and
-  `LOG_SESSION_SECRET`.
+- Config: `-password-hash` (bcrypt, generated with `log hash-password`).
+  Without it the password is `potter` and a banner (shown once logged in, so
+  it doesn't advertise the default) warns about it.
+- The cookie signing key comes from a random secret the app creates in
+  `<data-dir>/session-secret` (not backed up) combined with the password
+  hash: "Log out everywhere" in the menu (which replaces the secret),
+  deleting the file, or changing the password logs out every device.
 - Login sets an HMAC-signed session cookie (`HttpOnly; Secure;
   SameSite=Lax`, 1 year).
 - All non-public routes require the cookie.
@@ -362,16 +367,23 @@ log/
   non-GET request.
 - Login is rate-limited (e.g. 5 attempts/min per IP, in memory).
 
-### 5.4 Configuration (env)
+### 5.4 Configuration (flags)
 
-| Var | Purpose |
-|---|---|
-| `LOG_ADDR` | listen address (default `:8080`) |
-| `LOG_DATA_DIR` | `/data` — holds `log.db` and `photos/` |
-| `LOG_PASSWORD_HASH`, `LOG_SESSION_SECRET` | auth |
-| `LOG_PUBLIC_BASE_URL` | `https://unionpots.nyc` for public links |
-| `SPACES_ENDPOINT`, `SPACES_REGION`, `SPACES_BUCKET`, `SPACES_KEY`, `SPACES_SECRET` | backups. If unset, the app refuses to start unless `LOG_BACKUPS=off` |
-| `LOG_BACKUPS` | `off` to explicitly run without backups (local dev / testing) |
+Everything is a command-line flag; no environment variables (the README has
+the full list). Storage flags (`-data-dir`, `-spaces-*`, `-backup-prefix`,
+`-backup-dir`) are shared by every command and may come before the command,
+so a compose `entrypoint` can hold them for both `serve` and `restore`.
+`serve` adds `-addr`, `-password-hash`, `-min-piece-id`, `-allow-empty-db`
+and `-demo`. With no flags at all the app runs: default password, no
+backups, each with a banner. (v2 will add a public base URL flag.)
+
+**Demo mode** (`serve -demo`): the password `potter` is shown on the login
+page; the log resets to sample pieces (one in every state, dated relative to
+today, with placeholder photos) at startup and every 24 hours; photos can't
+be added or removed; public pages never exist; a banner says it's a demo.
+Backup flags and `-password-hash` are errors with `-demo`. Its session
+secret lives in its own data directory, so a demo login never works on the
+real log.
 
 ### 5.5 On-disk layout
 
@@ -386,12 +398,13 @@ log/
 
 - Multi-stage Dockerfile: `golang` build stage → small runtime image
   (`alpine` or distroless) containing only the `log` binary.
-- Entrypoint: `/app/log serve`. Backups run inside the process (§6), so
+- Entrypoint: `/app/log`, command `serve`. Backups run inside the process (§6), so
   there's no wrapper script or second process.
 - If `/data/log.db` is missing at startup, the app does **not** auto-restore.
   It creates an empty DB only when the bucket has no backups, and otherwise
-  refuses to start with "backups exist in Spaces; run `log restore` or set
-  `LOG_ALLOW_EMPTY_DB=1`". That stops a mis-mounted volume from silently
+  refuses to start with "backups exist in Spaces; run `log restore` or pass
+  `-allow-empty-db`". If the bucket can't be reached to check, it also
+  refuses (this is the disaster-recovery moment). That stops a mis-mounted volume from silently
   starting fresh (and then backing up an empty DB).
 - CI: add a second job to `.github/workflows/build.yml` that runs
   `go test ./...` and builds and pushes `jamespfennell/log.unionpots.nyc:latest`
@@ -462,11 +475,13 @@ stored, the oldest and the newest.
 The app also takes a snapshot automatically before applying any new schema
 migration.
 
-**No bucket configured:** the app refuses to start unless `LOG_BACKUPS=off`
-is set explicitly. With `off` it runs normally, but the photo mirror and DB
-snapshots are disabled and every page shows a "Backups disabled" banner.
-Local development uses `LOG_BACKUPS=off`, so production can never be
-unbacked-up by accident.
+**No bucket configured:** the app runs without backups and every page shows
+a "Backups disabled" banner. **Misconfigured** (some `-spaces-*` flags
+missing) or **unreachable** bucket: it still runs, with a banner saying
+what's wrong ("Backups misconfigured: missing -spaces-secret", "Backups not
+working: …"), and an unreachable bucket is retried every run. It refuses to
+start only when carrying on could lose data: `log.db` missing and the bucket
+can't be checked, or a migration due and its backup fails.
 
 **Photos:**
 - Photo files are immutable and content-addressed. Right after an upload the
@@ -482,7 +497,7 @@ unbacked-up by accident.
 human-readable, tool-independent archive of the life's work. Running it
 occasionally and keeping the zip on the desktop is the third copy.
 
-**Bucket prefix:** `LOG_BACKUP_PREFIX` (e.g. `prod`, `demo`) puts every
+**Bucket prefix:** `-backup-prefix` (e.g. `prod`) puts every
 object under a folder, so several deployments can share one bucket; each
 only lists, restores and prunes its own objects.
 

@@ -780,7 +780,7 @@ func TestMenuAndBackupsPage(t *testing.T) {
 		t.Errorf("new page should be titled \"New project\"")
 	}
 	// Backups are off in tests, which the page says.
-	if rec := a.do("GET", "/backups", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Backups are turned off") {
+	if rec := a.do("GET", "/backups", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Backups are off: no backup storage") {
 		t.Fatalf("backups page: %d", rec.Code)
 	}
 	// The login page has no menu.
@@ -827,5 +827,96 @@ func TestBackupsPageShowsPolicyAndStoredCopies(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("backups page should contain %q", want)
 		}
+	}
+}
+
+func TestBanners(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	banners := func() string {
+		body := a.do("GET", "/", nil).Body.String()
+		var out []string
+		for _, part := range strings.Split(body, `role="status">`)[1:] {
+			out = append(out, part[:strings.Index(part, "<")])
+		}
+		return strings.Join(out, " | ")
+	}
+	if got := banners(); got != "Backups disabled" {
+		t.Errorf("no backups: %q", got)
+	}
+	a.srv.DefaultPassword = true
+	a.srv.Backup = func() backup.Status { return backup.Status{Problem: "missing -spaces-secret"} }
+	if got := banners(); got != "Using the default password: set one with -password-hash | Backups misconfigured: missing -spaces-secret" {
+		t.Errorf("default password + misconfigured: %q", got)
+	}
+	a.srv.Backup = func() backup.Status {
+		return backup.Status{Enabled: true, LastError: "InvalidAccessKeyId: the key is wrong", LastErrorAt: a.srv.Now()}
+	}
+	if got := banners(); !strings.Contains(got, "Backups not working: InvalidAccessKeyId: the key is wrong (see Backups)") {
+		t.Errorf("never worked: %q", got)
+	}
+	// Logged out: no warnings (they'd tell anyone the password is the default).
+	a.cookie = nil
+	if body := a.do("GET", "/login", nil).Body.String(); strings.Contains(body, `role="status"`) {
+		t.Errorf("login page shouldn't show warnings")
+	}
+}
+
+func TestDemoMode(t *testing.T) {
+	a := newApp(t)
+	a.srv.Demo, a.srv.LoginMessage = true, "This is a demo. The password is “potter”."
+	login := a.do("GET", "/login", nil).Body.String()
+	if !strings.Contains(login, "The password is “potter”") || !strings.Contains(login, "reset every day") {
+		t.Errorf("demo login page should show the password and the demo banner")
+	}
+	a.login()
+	if _, err := a.store.CreatePieces(context.Background(), db.NewPieces{Count: 1, Action: "thrown", Date: "2026-10-01"}); err != nil {
+		t.Fatal(err)
+	}
+	page := a.do("GET", "/pieces/120", nil).Body.String()
+	if strings.Contains(page, "Add photos") || !strings.Contains(page, "turned off in the demo") {
+		t.Errorf("demo piece page shouldn't offer uploads")
+	}
+	if strings.Contains(page, "Backups disabled") {
+		t.Errorf("demo shows its own banner, not the backup one")
+	}
+	if rec := a.upload("/pieces/120/photos", true, map[string][]byte{"a.jpg": jpegBytes(t, 10, 10)}); rec.Code != 400 {
+		t.Errorf("demo upload: %d", rec.Code)
+	}
+}
+
+func TestLogOutEverywhere(t *testing.T) {
+	a := newApp(t)
+	rotated := 0
+	a.srv.Auth.Rotate = func() ([]byte, error) { rotated++; return []byte(strings.Repeat("n", 32)), nil }
+	a.login()
+	phone := a.cookie
+	a.login() // a second device
+	if !strings.Contains(a.do("GET", "/", nil).Body.String(), "Log out everywhere") {
+		t.Fatal("menu should offer Log out everywhere")
+	}
+	rec := a.do("POST", "/logout-everywhere", nil)
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/login?out=all" || rotated != 1 {
+		t.Fatalf("logout everywhere: %d %q rotated=%d", rec.Code, rec.Header().Get("Location"), rotated)
+	}
+	a.cookie = phone
+	if rec := a.do("GET", "/", nil); rec.Code != http.StatusSeeOther {
+		t.Errorf("the other device should be logged out too: %d", rec.Code)
+	}
+	a.cookie = nil
+	if !strings.Contains(a.do("GET", "/login?out=all", nil).Body.String(), "Logged out on every device.") {
+		t.Errorf("login page should confirm")
+	}
+	a.login() // logging in again works with the new secret
+	if rec := a.do("GET", "/", nil); rec.Code != 200 {
+		t.Errorf("log in again: %d", rec.Code)
+	}
+	// Not in the demo.
+	a.srv.Demo = true
+	if strings.Contains(a.do("GET", "/", nil).Body.String(), "Log out everywhere") {
+		t.Errorf("demo shouldn't offer it")
+	}
+	if rec := a.do("POST", "/logout-everywhere", nil); rec.Code != 404 || rotated != 1 {
+		t.Errorf("demo: %d rotated=%d", rec.Code, rotated)
 	}
 }

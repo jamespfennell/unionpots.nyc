@@ -130,3 +130,40 @@ func migrateTo(ctx context.Context, sqlDB *sql.DB, version int) error {
 // now is a sortable UTC timestamp with microseconds, so "recently changed"
 // ordering is exact.
 func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000000Z") }
+
+// ResetAll deletes everything (pieces, projects, clays, glazes, photos…)
+// and restarts piece numbering, keeping the schema. It's for the demo.
+func (s *Store) ResetAll(ctx context.Context) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "PRAGMA defer_foreign_keys = ON"); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+	if err != nil {
+		return err
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		tables = append(tables, name)
+	}
+	rows.Close()
+	for _, t := range tables {
+		q := `DELETE FROM "` + t + `"`
+		if t == "id_sequence" {
+			q = "UPDATE id_sequence SET next_piece_id = 1"
+		}
+		if _, err := tx.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

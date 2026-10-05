@@ -14,7 +14,8 @@ RUN CGO_ENABLED=0 go build -trimpath \
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates
 COPY --from=build /out/log /app/log
-ENV LOG_ADDR=:8080 LOG_DATA_DIR=/data
+# Flags default to -addr :8080 and -data-dir ./data, i.e. /data here.
+WORKDIR /
 VOLUME /data
 EXPOSE 8080
 ENTRYPOINT ["/app/log"]

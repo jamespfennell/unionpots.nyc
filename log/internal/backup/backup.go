@@ -47,6 +47,7 @@ const (
 // Status is the backup state shown in the site-wide banner.
 type Status struct {
 	Enabled     bool
+	Problem     string // backups are configured but the configuration is incomplete (then not Enabled)
 	Target      string
 	LastOK      time.Time // last run that left the remote copy up to date
 	LastUpload  time.Time

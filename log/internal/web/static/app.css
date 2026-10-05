@@ -71,6 +71,8 @@ a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset:
   text-align: center;
   font-size: 0.8rem;
 }
+.banner + .banner { border-top: 1px solid rgba(255, 255, 255, 0.35); }
+.banner-info { background: var(--ink); }
 
 .top {
   display: flex;

@@ -35,7 +35,7 @@ list them:
 
 ```sh
 aws s3 ls --endpoint-url https://nyc3.digitaloceanspaces.com \
-  s3://unionpots-log/db/ --recursive        # with LOG_BACKUP_PREFIX=prod: s3://unionpots-log/prod/db/
+  s3://unionpots-log/db/ --recursive        # with -backup-prefix=prod: s3://unionpots-log/prod/db/
 ```
 
 ## What the script does
@@ -47,7 +47,8 @@ aws s3 ls --endpoint-url https://nyc3.digitaloceanspaces.com \
    `./data.old.<timestamp>`. Never delete it first: it's the fallback.
    `restore` refuses to run while `log.db` exists, so this step is required.
 3. **Restore:** `docker compose run --rm log.unionpots.nyc restore [-at …|-key …]`.
-   This uses the service's image, environment and volume. It downloads the
+   This uses the service's image, entrypoint (with the backup flags) and
+   volume. It downloads the
    snapshot, checks its integrity, writes `./data/log.db`, then downloads all
    photos.
 4. **Start the app:** `docker compose up -d log.unionpots.nyc`. Use `up -d`,

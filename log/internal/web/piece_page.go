@@ -137,7 +137,7 @@ func (s *Server) loadPiecePage(r *http.Request) (*piecePage, error) {
 	if pp.Photos.Photos, err = s.Store.PiecePhotos(r.Context(), p.ID); err != nil {
 		return pp, err
 	}
-	pp.Photos.PieceID = p.ID
+	pp.Photos.PieceID, pp.Photos.Demo = p.ID, s.Demo
 	return pp, nil
 }
 
