@@ -1,0 +1,10 @@
+{{define "content"}}
+<h1>App ideas <span class="save-status" data-save-status aria-live="polite"></span></h1>
+<p class="muted">Ideas for improving the log, as they come up. Saved as you type.</p>
+<form method="post" action="/ideas" class="ideas" data-autosave
+      hx-post="/ideas" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+  <input type="hidden" name="autosave" value="1">
+  <textarea autocomplete="off" name="text" rows="18" aria-label="App ideas">{{.Text}}</textarea>
+  <noscript><button class="button" type="submit">Save</button></noscript>
+</form>
+{{end}}

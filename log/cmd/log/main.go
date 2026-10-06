@@ -84,10 +84,11 @@ const DefaultPassword = "potter"
 
 type serveOptions struct {
 	storage
-	Addr         string
-	PasswordHash string
-	AllowEmptyDB bool
-	Demo         bool
+	Addr          string
+	PasswordHash  string
+	AllowEmptyDB  bool
+	Demo          bool
+	PublicBaseURL string
 }
 
 func parseServe(st storage, args []string) (serveOptions, error) {
@@ -96,14 +97,19 @@ func parseServe(st storage, args []string) (serveOptions, error) {
 	o.addFlags(fs)
 	fs.StringVar(&o.Addr, "addr", ":8080", "listen address")
 	fs.StringVar(&o.PasswordHash, "password-hash", "", `bcrypt hash of the password, from "log hash-password" (default: the password "`+DefaultPassword+`", with a warning)`)
+	fs.StringVar(&o.PublicBaseURL, "public-base-url", "", "where the log links public piece pages, e.g. https://unionpots.nyc (default: this server)")
 	fs.BoolVar(&o.AllowEmptyDB, "allow-empty-db", false, "start with an empty database even though backups exist")
-	fs.BoolVar(&o.Demo, "demo", false, `demo mode: password "`+DefaultPassword+`" shown on the login page, sample data reset daily, no photo uploads; no backups or -password-hash allowed`)
+	fs.BoolVar(&o.Demo, "demo", false, `demo mode: password "`+DefaultPassword+`" shown on the login page, sample data reset hourly, no photo uploads; no backups or -password-hash allowed`)
 	fs.Parse(args)
 	switch {
 	case fs.NArg() > 0:
 		return o, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	case o.Demo && o.anyBackupFlag():
 		return o, errors.New("-demo can't be combined with backup flags: the demo is never backed up")
+	case o.Demo && o.PublicBaseURL != "":
+		return o, errors.New("-demo can't be combined with -public-base-url: the demo has no public pages")
+	case o.PublicBaseURL != "" && !strings.HasPrefix(o.PublicBaseURL, "https://") && !strings.HasPrefix(o.PublicBaseURL, "http://"):
+		return o, errors.New("-public-base-url must start with https:// (e.g. https://unionpots.nyc)")
 	case o.Demo && o.PasswordHash != "":
 		return o, errors.New(`-demo can't be combined with -password-hash: the demo password is always "` + DefaultPassword + `"`)
 	}
@@ -123,7 +129,7 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 	store, problem := o.store()
 	switch {
 	case o.Demo:
-		logger.Info("DEMO MODE: sample data, reset daily; no backups")
+		logger.Info("DEMO MODE: sample data, reset hourly; no backups")
 	case problem != "":
 		logger.Warn("BACKUPS ARE MISCONFIGURED, running without them", "problem", problem)
 	case store == nil:
@@ -247,6 +253,7 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 		PhotoBackup:     photoBackup,
 		DefaultPassword: defaultPassword && !o.Demo,
 		Demo:            o.Demo,
+		PublicBaseURL:   strings.TrimRight(o.PublicBaseURL, "/"),
 		Version:         versionText(),
 		Now:             time.Now,
 		Log:             logger,

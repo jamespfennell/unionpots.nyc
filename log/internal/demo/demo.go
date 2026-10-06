@@ -1,5 +1,5 @@
 // Package demo fills a log with sample pieces for the public demo, and
-// resets it to them every day. Dates are relative to today, so the demo
+// resets it to them every hour. Dates are relative to today, so the demo
 // always looks current.
 package demo
 
@@ -19,7 +19,7 @@ import (
 )
 
 // ResetEvery is how often the demo goes back to the sample data.
-const ResetEvery = 24 * time.Hour
+const ResetEvery = time.Hour
 
 // Reset deletes everything in the log and loads the sample pieces.
 func Reset(ctx context.Context, s *db.Store, files *photos.Store, now time.Time) error {
@@ -64,6 +64,14 @@ func seed(ctx context.Context, s *db.Store, files *photos.Store, now time.Time) 
 			return err
 		}
 		clays[c.Name] = id
+	}
+	studios := map[string]int64{}
+	for _, name := range []string{"Clayworks", "Home studio"} {
+		id, err := s.EnsureStudio(ctx, name)
+		if err != nil {
+			return err
+		}
+		studios[name] = id
 	}
 	for _, g := range []string{"Floating Blue", "Shino", "Tenmoku", "Celadon"} {
 		if _, err := s.EnsureGlaze(ctx, g); err != nil {
@@ -116,7 +124,7 @@ func seed(ctx context.Context, s *db.Store, files *photos.Store, now time.Time) 
 	for _, p := range projects {
 		first := p.steps[0]
 		ids, err := s.CreatePieces(ctx, db.NewPieces{
-			Count: p.count, Name: p.name, Action: first.action, Date: day(first.daysAgo),
+			Count: p.count, Name: p.name, Action: first.action, Date: day(first.daysAgo), StudioID: studios[p.studio()],
 			Form: p.form, ClayIDs: []int64{clays[p.clay]}, ClayWeight: p.weight, Dims: first.details.Dims,
 		})
 		if err != nil {
@@ -190,3 +198,13 @@ func (p pot) jpeg() []byte {
 }
 
 func clamp(v float64) uint8 { return uint8(math.Max(0, math.Min(255, v))) }
+
+// studio is where the sample project was made: the newest few at home, so the
+// In progress filter has something to show.
+func (p project) studio() string {
+	switch p.name {
+	case "Dinner plates", "Tall vase":
+		return "Home studio"
+	}
+	return "Clayworks"
+}

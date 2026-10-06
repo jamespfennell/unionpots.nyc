@@ -34,6 +34,8 @@ type Piece struct {
 	// StateDateApprox: that date is approximate (filled in by the notebook
 	// import).
 	StateDateApprox bool
+	StudioID        int64 // where it was made; 0 if not recorded
+	StudioName      string
 
 	ProjectName  string // "" if the project is unnamed
 	ProjectSize  int    // number of pieces in the project
@@ -103,6 +105,7 @@ func (p Project) DisplayName() string {
 // NewPieces describes pieces to create together.
 type NewPieces struct {
 	Count     int
+	StudioID  int64        // where they're made; 0 if not recorded
 	ProjectID int64        // 0 = create a new project
 	Name      string       // name of the new project; ignored when adding to an existing one
 	Action    model.Action // how the pieces start, e.g. thrown
@@ -185,6 +188,14 @@ func (s *Store) CreatePieces(ctx context.Context, np NewPieces) ([]int64, error)
 			if err := insertEvent(ctx, tx, id, np.Action, np.Date, ts); err != nil {
 				return nil, err
 			}
+			if np.StudioID != 0 {
+				if _, err := tx.ExecContext(ctx, "UPDATE pieces SET studio_id = ? WHERE id = ?", np.StudioID, id); err != nil {
+					if isForeignKeyError(err) {
+						return nil, userErr("unknown studio")
+					}
+					return nil, err
+				}
+			}
 			if err := setPieceClays(ctx, tx, id, np.ClayIDs); err != nil {
 				return nil, err
 			}
@@ -239,13 +250,15 @@ const pieceColumns = `p.id, p.project_id, p.notes, p.state,
 	(SELECT COUNT(*) FROM pieces q WHERE q.project_id = p.project_id),
 	(SELECT COUNT(*) FROM pieces q WHERE q.project_id = p.project_id AND q.id <= p.id),
 	COALESCE((SELECT approximate FROM events e WHERE e.piece_id = p.id
-	          ORDER BY occurred_on DESC, id DESC LIMIT 1), 0)`
+	          ORDER BY occurred_on DESC, id DESC LIMIT 1), 0),
+	COALESCE(p.studio_id, 0),
+	COALESCE((SELECT name FROM studios st WHERE st.id = p.studio_id), '')`
 
 func scanPiece(row interface{ Scan(...any) error }) (Piece, error) {
 	var p Piece
 	err := row.Scan(&p.ID, &p.ProjectID, &p.Notes, &p.State,
 		&p.Public, &p.CreatedAt, &p.UpdatedAt, &p.StateDate,
-		&p.ProjectName, &p.ProjectSize, &p.ProjectIndex, &p.StateDateApprox)
+		&p.ProjectName, &p.ProjectSize, &p.ProjectIndex, &p.StateDateApprox, &p.StudioID, &p.StudioName)
 	return p, err
 }
 

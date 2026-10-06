@@ -373,9 +373,25 @@ so a compose `entrypoint` can hold them for both `serve` and `restore`.
 and `-demo`. With no flags at all the app runs: default password, no
 backups, each with a banner. (v2 will add a public base URL flag.)
 
+**Public base URL** (`serve -public-base-url https://unionpots.nyc`): where
+the log's "public page" link points, so it uses the main domain; without it
+the link stays on the log's own host. Not allowed with `-demo`.
+
+**Studios** (migration 008): each piece records where it was made (one
+studio; all pieces before October 2026 were made at Clayworks). It's chosen
+on the New form (pills, defaulting to the last used; "(manage studios)" goes
+to `/studios` to add, rename or delete unused ones), changeable on the edit
+page, shown in Details. Pieces added to a project are made where the
+project is. In progress has a filter (All · each studio) once there are two
+studios; the choice is remembered in a cookie, so arriving at a studio and
+picking it once keeps Home showing just that studio's pieces.
+
+**App ideas** (menu, under Backups): one free-text page, saved as you type, for
+ideas about improving the log as they come up (migration 007, `app_text`).
+
 **Demo mode** (`serve -demo`): the password `potter` is shown on the login
 page; the log resets to sample pieces (one in every state, dated relative to
-today, with placeholder photos) at startup and every 24 hours; photos can't
+today, with placeholder photos) at startup and every hour; photos can't
 be added or removed; public pages never exist; a banner says it's a demo.
 Backup flags and `-password-hash` are errors with `-demo`. Its session
 secret lives in its own data directory, so a demo login never works on the

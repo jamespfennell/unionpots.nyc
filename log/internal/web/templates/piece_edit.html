@@ -18,6 +18,7 @@
     {{end}}
     <label class="field">Form <input name="form" value="{{.Details.Form}}" autocomplete="off" placeholder="e.g. bowl"></label>
     <input type="hidden" name="clays_shown" value="1">
+    {{template "studioPills" (dict "Studios" .Studios "Selected" $p.StudioID)}}
     {{template "clayPills" (dict "Clays" .Clays "Selected" .ClayIDs)}}
     {{if .ShowGlazes}}
     {{template "glazeInputs" (dict "Text" .Details.GlazeText "Names" .GlazeNames)}}

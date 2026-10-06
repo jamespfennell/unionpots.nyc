@@ -22,6 +22,7 @@
     <input name="form" autocomplete="off" placeholder="e.g. bowl">
   </label>
 
+  {{template "studioPills" (dict "Studios" .Studios "Selected" .Studio)}}
   {{template "clayPills" (dict "Clays" .Clays "Selected" .SelectedClays)}}
 
   <label class="field field-short">Clay weight (lb, optional)

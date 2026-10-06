@@ -1,0 +1,30 @@
+{{define "content"}}
+<h1>Studios</h1>
+<p class="muted">Where pieces are made. Renames save as you type.</p>
+{{range .Studios}}
+<section class="studio">
+  <form method="post" action="/studios/{{.ID}}" class="stack" data-autosave
+        hx-post="/studios/{{.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+    <input type="hidden" name="autosave" value="1">
+    <label class="field">Name <span class="save-status" data-save-status aria-live="polite"></span>
+      <input autocomplete="off" name="title" value="{{.Name}}" required>
+    </label>
+  </form>
+  <p class="hint">{{if eq .Pieces 1}}1 piece{{else}}{{.Pieces}} pieces{{end}} made here.</p>
+  {{if eq .Pieces 0}}
+  <form method="post" action="/studios/{{.ID}}/delete">
+    <button class="link-button danger" type="submit">Delete</button>
+  </form>
+  {{end}}
+</section>
+{{else}}
+<p class="empty">No studios yet.</p>
+{{end}}
+<section>
+  <h2>Add a studio</h2>
+  <form method="post" action="/studios" class="stack">
+    <label class="field">Name <input autocomplete="off" name="title" required placeholder="e.g. Clayworks"></label>
+    <button class="button" type="submit">Add</button>
+  </form>
+</section>
+{{end}}

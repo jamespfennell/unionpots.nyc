@@ -28,11 +28,13 @@
       <nav class="menu-panel">
         <a href="/new">New project</a>
         <hr>
+        <a href="/">In progress</a>
         <a href="/finished">Finished pieces</a>
         <a href="/clays">Clays</a>
         <a href="/glazes">Glazes</a>
         <hr>
         <a href="/backups">Backups</a>
+        <a href="/ideas">App ideas</a>
         <form method="post" action="/logout" hx-boost="false"><button type="submit">Log out</button></form>
         {{if .LogOutEverywhere}}
         <form method="post" action="/logout-everywhere" hx-boost="false"

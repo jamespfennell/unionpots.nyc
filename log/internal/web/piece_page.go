@@ -29,7 +29,8 @@ type piecePage struct {
 	Measurements db.Measurements
 	StepDims     []dimsRow // the measurements form: one row per measured step
 	Clays        []db.Clay // all clay bodies, for the pills
-	ClayIDs      []int64   // the ones this piece is made from
+	Studios      []db.Studio
+	ClayIDs      []int64 // the ones this piece is made from
 	Details      db.PieceDetails
 	GlazeNames   []string // known glazes, recognised in glaze text and suggested while typing
 	ShowGlazes   bool     // the edit page offers the glaze text once the piece is (being) glazed
@@ -137,12 +138,18 @@ func (s *Server) loadPiecePage(r *http.Request) (*piecePage, error) {
 		pp.Undo = &events[len(events)-1]
 	}
 	pp.Facts = pieceFacts(events, m, pieceClays, details, glazes)
+	if p.StudioName != "" {
+		pp.Facts = append([]fact{textFact("Studio", p.StudioName)}, pp.Facts...)
+	}
+	if pp.Studios, err = s.Store.Studios(r.Context()); err != nil {
+		return pp, err
+	}
 	if pp.Photos.Photos, err = s.Store.PiecePhotos(r.Context(), p.ID); err != nil {
 		return pp, err
 	}
 	pp.Photos.PieceID, pp.Photos.Demo = p.ID, s.Demo
 	if p.State == model.StateFinished && !s.Demo {
-		pp.PublicURL = fmt.Sprintf("/p/%d", p.ID)
+		pp.PublicURL = fmt.Sprintf("%s/p/%d", s.PublicBaseURL, p.ID)
 	}
 	return pp, nil
 }

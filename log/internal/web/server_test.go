@@ -23,11 +23,12 @@ import (
 )
 
 type testApp struct {
-	t      *testing.T
-	store  *db.Store
-	h      http.Handler
-	srv    *Server
-	cookie *http.Cookie
+	t       *testing.T
+	store   *db.Store
+	h       http.Handler
+	srv     *Server
+	cookie  *http.Cookie
+	cookie2 *http.Cookie // an extra cookie to send (e.g. the studio filter)
 }
 
 func newApp(t *testing.T) *testApp {
@@ -69,6 +70,9 @@ func (a *testApp) do(method, target string, form url.Values) *httptest.ResponseR
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	if a.cookie != nil {
 		req.AddCookie(a.cookie)
+	}
+	if a.cookie2 != nil {
+		req.AddCookie(a.cookie2)
 	}
 	rec := httptest.NewRecorder()
 	a.h.ServeHTTP(rec, req)
@@ -759,7 +763,7 @@ func TestMenuAndBackupsPage(t *testing.T) {
 	a := newApp(t)
 	a.login()
 	home := a.do("GET", "/", nil).Body.String()
-	for _, want := range []string{`href="/new">+ New project</a>`, `<a href="/new">New project</a>`, `href="/clays">Clays</a>`, `href="/glazes">Glazes</a>`,
+	for _, want := range []string{`<a href="/">In progress</a>`, `href="/new">+ New project</a>`, `<a href="/new">New project</a>`, `href="/clays">Clays</a>`, `href="/glazes">Glazes</a>`,
 		`href="/backups">Backups</a>`, `action="/logout"`} {
 		if !strings.Contains(home, want) {
 			t.Errorf("home should contain %q", want)
@@ -855,7 +859,7 @@ func TestDemoMode(t *testing.T) {
 	a := newApp(t)
 	a.srv.Demo, a.srv.LoginMessage = true, "This is a demo. The password is “potter”."
 	login := a.do("GET", "/login", nil).Body.String()
-	if !strings.Contains(login, "The password is “potter”") || !strings.Contains(login, "reset every day") {
+	if !strings.Contains(login, "The password is “potter”") || !strings.Contains(login, "demo site: data is reset every hour") {
 		t.Errorf("demo login page should show the password and the demo banner")
 	}
 	a.login()
@@ -1043,6 +1047,10 @@ func TestPublicPage(t *testing.T) {
 	if !strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), `href="/p/120"`) {
 		t.Errorf("the piece page should link to its public page")
 	}
+	a.srv.PublicBaseURL = "https://unionpots.nyc"
+	if !strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), `href="https://unionpots.nyc/p/120"`) {
+		t.Errorf("with a public base URL, the link should go there")
+	}
 	a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Action: model.Thrown, Date: "2026-09-01"}) // #122, unfinished
 
 	a.cookie = nil // public: no login
@@ -1086,5 +1094,110 @@ func TestPublicPage(t *testing.T) {
 	a.srv.Demo = true
 	if rec := a.do("GET", "/p/120", nil); rec.Code != 404 {
 		t.Errorf("no public pages in the demo: %d", rec.Code)
+	}
+}
+
+func TestIdeas(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	if !strings.Contains(a.do("GET", "/", nil).Body.String(), `<a href="/ideas">App ideas</a>`) {
+		t.Errorf("menu should link to Ideas")
+	}
+	if rec := a.do("POST", "/ideas", url.Values{"text": {"- a search page\n- export"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("save: %d", rec.Code)
+	}
+	if body := a.do("GET", "/ideas", nil).Body.String(); !strings.Contains(body, "- a search page\n- export</textarea>") {
+		t.Errorf("ideas should be shown back")
+	}
+	a.cookie = nil
+	if rec := a.do("GET", "/ideas", nil); rec.Code != http.StatusSeeOther {
+		t.Errorf("ideas are private: %d", rec.Code)
+	}
+}
+
+func TestStudios(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	// Add two studios on the Studios page.
+	a.do("POST", "/studios", url.Values{"title": {"Clayworks"}})
+	a.do("POST", "/studios", url.Values{"title": {"Greenpoint"}})
+	st, _ := a.store.Studios(ctx)
+	if len(st) != 2 {
+		t.Fatalf("studios = %+v", st)
+	}
+	cw, gp := st[0].ID, st[1].ID
+
+	// The New form offers them; the choice is recorded.
+	if !strings.Contains(a.do("GET", "/new", nil).Body.String(), `name="studio" value="`+fmt.Sprint(cw)+`"`) {
+		t.Errorf("New should offer the studios")
+	}
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "title": {"Bowls"}, "count": {"2"}, "studio": {fmt.Sprint(cw)}})
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "title": {"Mugs"}, "studio": {fmt.Sprint(gp)}})
+	if p, _ := a.store.GetPiece(ctx, 120); p.StudioName != "Clayworks" {
+		t.Errorf("#120 studio = %q", p.StudioName)
+	}
+	// The New form defaults to the studio used last.
+	if !strings.Contains(a.do("GET", "/new", nil).Body.String(), `name="studio" value="`+fmt.Sprint(gp)+`" class="visually-hidden" checked`) {
+		t.Errorf("New should default to the last studio")
+	}
+	// Pieces added to a project are made where the project is.
+	p120, _ := a.store.GetPiece(ctx, 120)
+	a.do("POST", fmt.Sprintf("/projects/%d/pieces", p120.ProjectID), url.Values{"action": {"thrown"}, "count": {"1"}})
+	if p, _ := a.store.GetPiece(ctx, 123); p.StudioName != "Clayworks" {
+		t.Errorf("added piece #123 studio = %q, want the project's", p.StudioName)
+	}
+	// The piece page shows it; the edit page changes it.
+	if !strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), "Clayworks") {
+		t.Errorf("piece page should show the studio")
+	}
+	a.do("POST", "/pieces/121", url.Values{"studio": {fmt.Sprint(gp)}})
+	if p, _ := a.store.GetPiece(ctx, 121); p.StudioName != "Greenpoint" {
+		t.Errorf("edit: #121 studio = %q", p.StudioName)
+	}
+
+	// In progress: filter by studio, remembered.
+	home := func(q string) string { return a.do("GET", "/"+q, nil).Body.String() }
+	all := home("")
+	if !strings.Contains(all, `class="studio-filter"`) || !strings.Contains(all, "#120") || !strings.Contains(all, "#122") {
+		t.Fatalf("home should show the filter and every piece")
+	}
+	rec := a.do("GET", fmt.Sprintf("/?studio=%d", cw), nil)
+	body := rec.Body.String()
+	if !strings.Contains(body, "#120") || strings.Contains(body, "#121") || strings.Contains(body, "#122") {
+		t.Errorf("filtered to Clayworks: wrong pieces")
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == studioCookie {
+			a.cookie2 = c
+		}
+	}
+	if a.cookie2 == nil {
+		t.Fatal("the choice should be remembered")
+	}
+	if body := home(""); strings.Contains(body, "#122") || !strings.Contains(body, "#120") {
+		t.Errorf("the filter should stick")
+	}
+	if body := home("?studio=all"); !strings.Contains(body, "#122") {
+		t.Errorf("All shows everything again")
+	}
+
+	// A studio in use can't be deleted; an unused one can.
+	if rec := a.do("POST", fmt.Sprintf("/studios/%d/delete", cw), nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("deleting a used studio: %d", rec.Code)
+	}
+	a.do("POST", "/studios", url.Values{"title": {"Spare"}})
+	st, _ = a.store.Studios(ctx)
+	for _, s := range st {
+		if s.Name == "Spare" {
+			a.do("POST", fmt.Sprintf("/studios/%d/delete", s.ID), nil)
+		}
+	}
+	if st, _ = a.store.Studios(ctx); len(st) != 2 {
+		t.Errorf("unused studio should be deleted: %+v", st)
+	}
+	a.do("POST", fmt.Sprintf("/studios/%d", gp), url.Values{"title": {"Greenpoint Studio"}})
+	if p, _ := a.store.GetPiece(ctx, 122); p.StudioName != "Greenpoint Studio" {
+		t.Errorf("rename: %q", p.StudioName)
 	}
 }

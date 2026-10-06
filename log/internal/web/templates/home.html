@@ -1,6 +1,14 @@
 {{define "content"}}
 {{with .Notice}}<p class="notice" role="status">{{.}}</p>{{end}}
 <p class="home-new"><a class="button block" href="/new">+ New project</a></p>
+{{with .Studios}}
+<nav class="studio-filter" aria-labelledby="studio-filter-label">
+  <span id="studio-filter-label" class="studio-filter-label">Studio</span>
+  <span class="segmented">
+    <a href="/?studio=all"{{if eq $.Studio 0}} aria-current="true"{{end}}>All</a>{{range .}}<a href="/?studio={{.ID}}"{{if eq $.Studio .ID}} aria-current="true"{{end}}>{{.Name}}</a>{{end}}
+  </span>
+</nav>
+{{end}}
 {{range .Sections}}
 <section class="group">
   <h2>{{.State.Label}}<span class="count">{{len .Pieces}}</span></h2>

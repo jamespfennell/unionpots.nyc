@@ -50,8 +50,9 @@ is due and the backup before it fails.
 |---|---|
 | `-addr` | Listen address. Default `:8080`. |
 | `-password-hash` | bcrypt hash from `log hash-password`. Without it the password is `potter`, with a banner warning about it. |
+| `-public-base-url` | Where the log links each finished piece's public page, e.g. `https://unionpots.nyc` (so the link is `https://unionpots.nyc/p/97`). Default: this server (`/p/97`). Not with `-demo`. |
 | `-allow-empty-db` | Start with an empty database even though backups exist. |
-| `-demo` | Demo mode: the password `potter` is shown on the login page, the log resets to sample pieces at startup and every day, and photos can't be added or removed. Can't be combined with backup flags or `-password-hash`. |
+| `-demo` | Demo mode: the password `potter` is shown on the login page, the log resets to sample pieces at startup and every hour, and photos can't be added or removed. Can't be combined with backup flags or `-password-hash`. |
 
 **Sessions.** Logins are signed with a random secret the app creates on
 first start, `<data-dir>/session-secret`. **Log out everywhere** in the menu

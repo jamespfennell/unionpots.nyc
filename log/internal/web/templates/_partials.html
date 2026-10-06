@@ -155,3 +155,17 @@
 </fieldset>
 {{end}}
 {{end}}
+
+{{/* Where the pieces are made: one choice. Args: Studios, Selected (id). */}}
+{{define "studioPills"}}
+<fieldset class="pills">
+  <legend>Studio <span class="legend-link">(<a href="/studios">manage studios</a>)</span></legend>
+  {{if .Studios}}
+  <div class="pill-row">
+    {{range .Studios}}
+    <label class="pill"><input type="radio" name="studio" value="{{.ID}}" class="visually-hidden"{{if eq $.Selected .ID}} checked{{end}}><span>{{.Name}}</span></label>
+    {{end}}
+  </div>
+  {{end}}
+</fieldset>
+{{end}}

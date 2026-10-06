@@ -44,6 +44,9 @@ type Server struct {
 	// DefaultPassword means no password was configured, so it's the
 	// default one; a banner says so (to a logged-in user).
 	DefaultPassword bool
+	// PublicBaseURL is where public pages are linked from the log, e.g.
+	// "https://unionpots.nyc" (no trailing slash); "" links to this server.
+	PublicBaseURL string
 	// Demo turns off photo uploads and shows a demo banner instead of the
 	// backup ones.
 	Demo bool
@@ -84,6 +87,10 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("GET /clays/{id}", s.handle(s.clay))
 	private.Handle("POST /clays/{id}", s.handle(s.updateClay))
 	private.Handle("POST /clays/{id}/delete", s.handle(s.deleteClay))
+	private.Handle("GET /studios", s.handle(s.studios))
+	private.Handle("POST /studios", s.handle(s.addStudio))
+	private.Handle("POST /studios/{id}", s.handle(s.renameStudio))
+	private.Handle("POST /studios/{id}/delete", s.handle(s.deleteStudio))
 	private.Handle("GET /glazes", s.handle(s.glazes))
 	private.Handle("POST /glazes", s.handle(s.addGlaze))
 	private.Handle("GET /glazes/{id}", s.handle(s.glaze))
@@ -93,6 +100,8 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("POST /pieces/{id}/photos/{pid}/delete", s.handle(s.deletePhoto))
 	private.HandleFunc("GET /photos/{name}", s.photoFile)
 	private.Handle("GET /backups", s.handle(s.backups))
+	private.Handle("GET /ideas", s.handle(s.ideas))
+	private.Handle("POST /ideas", s.handle(s.saveIdeas))
 	private.Handle("GET /new", s.handle(s.newForm))
 	private.Handle("POST /new", s.handle(s.create))
 
@@ -368,7 +377,7 @@ func (s *Server) page(r *http.Request, title string) Page {
 	p := Page{Title: title, Version: s.Version, LoggedIn: s.Auth.valid(r), Today: model.Today(s.Now()),
 		LogOutEverywhere: s.canLogOutEverywhere()}
 	if s.Demo {
-		p.Banners = append(p.Banners, banner{Text: "This is a demo: everything you change is reset every day."})
+		p.Banners = append(p.Banners, banner{Text: "demo site: data is reset every hour"})
 		return p
 	}
 	if !p.LoggedIn {
@@ -599,11 +608,25 @@ type stateSection struct {
 
 // home lists all in-progress work, one section per state.
 func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
+	studios, err := s.Store.Studios(r.Context())
+	if err != nil {
+		return err
+	}
+	studio := s.studioFilter(w, r, studios)
 	var sections []stateSection
 	for _, st := range model.InProgress {
 		pieces, err := s.Store.PiecesInState(r.Context(), st)
 		if err != nil {
 			return err
+		}
+		if studio != 0 {
+			var here []db.Piece
+			for _, p := range pieces {
+				if p.StudioID == studio {
+					here = append(here, p)
+				}
+			}
+			pieces = here
 		}
 		sections = append(sections, stateSection{st, pieces})
 	}
@@ -611,7 +634,12 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 		Page
 		Sections []stateSection
 		Notice   string // what just happened, after creating pieces or recording a step
-	}{s.page(r, "Log"), sections, ""}
+		Studios  []db.Studio
+		Studio   int64 // the studio shown; 0 = all
+	}{s.page(r, "Log"), sections, "", studios, studio}
+	if len(studios) < 2 {
+		data.Studios = nil // nothing to filter by
+	}
 	if c, err := r.Cookie(flashCookie); err == nil {
 		if q, err := url.ParseQuery(c.Value); err == nil {
 			data.Notice = homeNotice(q)
@@ -722,6 +750,15 @@ func (s *Server) updatePiece(w http.ResponseWriter, r *http.Request) error {
 	}
 	if _, ok := r.Form["glaze_text"]; ok {
 		if err := s.Store.SetGlazeText(r.Context(), id, r.FormValue("glaze_text")); err != nil {
+			return err
+		}
+	}
+	if _, ok := r.Form["studio"]; ok {
+		studioID, err := formInt(r, "studio", 0)
+		if err != nil {
+			return err
+		}
+		if err := s.Store.SetPieceStudio(r.Context(), id, studioID); err != nil {
 			return err
 		}
 	}
@@ -896,12 +933,22 @@ func (s *Server) newForm(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	studios, err := s.Store.Studios(r.Context())
+	if err != nil {
+		return err
+	}
+	lastStudio, err := s.Store.LastUsedStudio(r.Context())
+	if err != nil {
+		return err
+	}
 	data := struct {
 		Page
 		NextID        int64
 		Clays         []db.Clay
 		SelectedClays []int64
-	}{s.page(r, "New project"), next, clays, lastClays}
+		Studios       []db.Studio
+		Studio        int64
+	}{s.page(r, "New project"), next, clays, lastClays, studios, lastStudio}
 	return s.render(w, http.StatusOK, "new", data)
 }
 
@@ -939,8 +986,13 @@ func (s *Server) createFrom(w http.ResponseWriter, r *http.Request, projectID in
 			return err
 		}
 	}
+	studioID, err := s.formStudio(r, projectID)
+	if err != nil {
+		return err
+	}
 	ids, err := s.Store.CreatePieces(r.Context(), db.NewPieces{
 		Count:      int(count),
+		StudioID:   studioID,
 		ProjectID:  projectID,
 		Name:       strings.TrimSpace(r.FormValue("title")),
 		Form:       r.FormValue("form"),

@@ -50,6 +50,9 @@ func TestParseServe(t *testing.T) {
 		{[]string{"-demo", "-backup-prefix", "demo"}, "-demo can't be combined with backup flags"},
 		{[]string{"-demo", "-password-hash", hash}, "-demo can't be combined with -password-hash"},
 		{[]string{"extra"}, "unexpected argument"},
+		{[]string{"-public-base-url", "https://unionpots.nyc"}, ""},
+		{[]string{"-public-base-url", "unionpots.nyc"}, "must start with https://"},
+		{[]string{"-demo", "-public-base-url", "https://unionpots.nyc"}, "no public pages"},
 	}
 	for _, c := range cases {
 		_, err := parseServe(storage{DataDir: "./data"}, c.args)
