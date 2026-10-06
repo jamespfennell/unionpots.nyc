@@ -140,16 +140,21 @@ func publicDims(d model.Dims) string {
 	return strings.Join(parts, " × ") + " in"
 }
 
+// publicNotFound answers with the same "page not found" page as the
+// website, whether the piece doesn't exist or just isn't finished.
 func (s *Server) publicNotFound(w http.ResponseWriter, err error) {
 	if err != db.ErrNotFound {
 		s.publicError(w, err)
 		return
 	}
+	var buf bytes.Buffer
+	if err := s.pages["public"].ExecuteTemplate(&buf, "publicNotFound", nil); err != nil {
+		s.publicError(w, err)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusNotFound)
-	fmt.Fprint(w, `<!doctype html><meta charset="utf-8"><title>Not found · Union Pots</title>`+
-		`<p style="font-family:Georgia,serif;margin:4rem auto;max-width:30rem;text-align:center">`+
-		`Not found. <a href="https://unionpots.nyc" style="color:#7a3f2e">Union Pots</a></p>`)
+	buf.WriteTo(w)
 }
 
 func (s *Server) publicError(w http.ResponseWriter, err error) {

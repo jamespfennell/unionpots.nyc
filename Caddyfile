@@ -1,0 +1,9 @@
+# The website: static files, and 404.html (with a 404 status) for anything missing.
+:8080 {
+	root * /unionpots.nyc
+	file_server
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+}

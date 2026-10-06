@@ -1073,9 +1073,10 @@ func TestPublicPage(t *testing.T) {
 	if body := a.do("GET", "/p/121", nil).Body.String(); strings.Contains(body, "<dt>size") {
 		t.Errorf("without a finished size, no size is shown")
 	}
-	for _, path := range []string{"/p/122", "/p/999"} {
-		if rec := a.do("GET", path, nil); rec.Code != 404 {
-			t.Errorf("%s: %d, want 404", path, rec.Code)
+	for _, path := range []string{"/p/122", "/p/999", "/p/junk", "/p/120/anything", "/p/"} {
+		rec := a.do("GET", path, nil)
+		if rec.Code != 404 || !strings.Contains(rec.Body.String(), "<p>page not found</p>") {
+			t.Errorf("%s: %d, want the shared 404 page", path, rec.Code)
 		}
 	}
 	p120, _ := a.store.PiecePhotos(ctx, 120)

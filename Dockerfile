@@ -1,5 +1,6 @@
 FROM caddy
 WORKDIR /unionpots.nyc
-COPY index.html .
+COPY index.html 404.html ./
 COPY images images
-ENTRYPOINT caddy file-server --listen :8080 --root /unionpots.nyc
+COPY Caddyfile /etc/caddy/Caddyfile
+ENTRYPOINT ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

@@ -102,6 +102,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	// Public pages: no login.
 	mux.HandleFunc("GET /p/{id}", s.publicPage)
+	mux.HandleFunc("/p/", func(w http.ResponseWriter, r *http.Request) { s.publicNotFound(w, db.ErrNotFound) })
 	mux.Handle("GET /login", s.handle(s.loginForm))
 	mux.Handle("POST /login", s.handle(s.login))
 	mux.Handle("POST /logout", s.handle(s.logout))
