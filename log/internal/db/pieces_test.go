@@ -21,7 +21,10 @@ func newStore(t *testing.T) *Store {
 	if err := Migrate(context.Background(), sqlDB); err != nil {
 		t.Fatal(err)
 	}
-	return &Store{DB: sqlDB, MinPieceID: 120}
+	if _, err := sqlDB.Exec("UPDATE id_sequence SET next_piece_id = 120"); err != nil { // tests number from #120
+		t.Fatal(err)
+	}
+	return &Store{DB: sqlDB}
 }
 
 func create(t *testing.T, s *Store, np NewPieces) []int64 {
@@ -66,32 +69,6 @@ func TestIDAllocationStartsAt120AndNeverReuses(t *testing.T) {
 	}
 	if ids := create(t, s, NewPieces{}); ids[0] != 123 {
 		t.Fatalf("after delete got #%d, want #123", ids[0])
-	}
-}
-
-func TestExplicitIDs(t *testing.T) {
-	s := newStore(t)
-	ctx := context.Background()
-	// Backfill below the counter leaves the counter alone.
-	if ids := create(t, s, NewPieces{StartID: 5, Count: 2, Action: model.Finished}); !equal(ids, []int64{5, 6}) {
-		t.Fatalf("ids = %v", ids)
-	}
-	if next, _ := s.NextPieceID(ctx); next != 120 {
-		t.Fatalf("next = %d, want 120", next)
-	}
-	// Collision is a user error and creates nothing.
-	_, err := s.CreatePieces(ctx, NewPieces{StartID: 4, Count: 2, Action: model.Thrown, Date: "2026-01-01"})
-	var ue *UserError
-	if !errors.As(err, &ue) {
-		t.Fatalf("err = %v, want UserError", err)
-	}
-	if _, err := s.GetPiece(ctx, 4); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("piece #4 should not exist: %v", err)
-	}
-	// Explicit IDs at or above the counter push it forward.
-	create(t, s, NewPieces{StartID: 200})
-	if next, _ := s.NextPieceID(ctx); next != 201 {
-		t.Fatalf("next = %d, want 201", next)
 	}
 }
 
@@ -306,32 +283,21 @@ func TestMigration2MovesPieceNamesToProjects(t *testing.T) {
 	}
 }
 
-func TestMinPieceID(t *testing.T) {
-	s := newStore(t)
-	ctx := context.Background()
-
-	// No minimum: numbering starts at #1.
-	s.MinPieceID = 0
+func TestNumberingStartsAtOne(t *testing.T) {
+	sqlDB, err := Open(filepath.Join(t.TempDir(), "log.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	if err := Migrate(context.Background(), sqlDB); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{DB: sqlDB}
 	if ids := create(t, s, NewPieces{Count: 2}); !equal(ids, []int64{1, 2}) {
 		t.Fatalf("ids = %v, want [1 2]", ids)
 	}
-	// Raising the minimum jumps ahead.
-	s.MinPieceID = 120
-	if ids := create(t, s, NewPieces{}); !equal(ids, []int64{120}) {
-		t.Fatalf("ids = %v, want [120]", ids)
-	}
-	// Lowering it never reuses numbers: the counter has moved on.
-	s.MinPieceID = 1
-	if next, _ := s.NextPieceID(ctx); next != 121 {
-		t.Fatalf("next = %d, want 121", next)
-	}
-	// Backfill below the minimum is still allowed.
-	s.MinPieceID = 120
-	if ids := create(t, s, NewPieces{StartID: 7}); !equal(ids, []int64{7}) {
-		t.Fatalf("backfill ids = %v", ids)
-	}
-	if next, _ := s.NextPieceID(ctx); next != 121 {
-		t.Fatalf("after backfill next = %d, want 121", next)
+	if ids := create(t, s, NewPieces{Count: 3}); !equal(ids, []int64{3, 4, 5}) {
+		t.Fatalf("ids = %v, want [3 4 5]", ids)
 	}
 }
 
@@ -369,7 +335,10 @@ func TestMigration4KeepsEvents(t *testing.T) {
 	if err := migrateTo(ctx, sqlDB, 3); err != nil {
 		t.Fatal(err)
 	}
-	s := &Store{DB: sqlDB, MinPieceID: 120}
+	if _, err := sqlDB.Exec("UPDATE id_sequence SET next_piece_id = 120"); err != nil { // tests number from #120
+		t.Fatal(err)
+	}
+	s := &Store{DB: sqlDB}
 	ids := create(t, s, NewPieces{Count: 2})
 	if err := s.AddEvents(ctx, ids, model.Trimmed, "2026-10-02", StepDetails{}); err != nil {
 		t.Fatal(err)

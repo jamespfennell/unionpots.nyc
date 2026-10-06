@@ -32,7 +32,10 @@ func setup(t *testing.T) (*Backuper, *db.Store, DirStore) {
 		Now: func() time.Time { clock = clock.Add(time.Hour); return clock },
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
-	return b, &db.Store{DB: sqlDB, MinPieceID: 120}, store
+	if _, err := sqlDB.Exec("UPDATE id_sequence SET next_piece_id = 120"); err != nil { // tests number from #120
+		t.Fatal(err)
+	}
+	return b, &db.Store{DB: sqlDB}, store
 }
 
 func TestSkipsUnchangedAndUploadsChanges(t *testing.T) {

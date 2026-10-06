@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +78,7 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("GET /projects/{id}", s.handle(s.project))
 	private.Handle("POST /projects/{id}", s.handle(s.updateProject))
 	private.Handle("POST /projects/{id}/pieces", s.handle(s.addToProject))
+	private.Handle("GET /finished", s.handle(s.finished))
 	private.Handle("GET /clays", s.handle(s.clays))
 	private.Handle("POST /clays", s.handle(s.addClay))
 	private.Handle("GET /clays/{id}", s.handle(s.clay))
@@ -98,6 +100,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cacheStatic(http.StripPrefix("/static/", http.FileServerFS(static))))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	// Public pages: no login.
+	mux.HandleFunc("GET /p/{id}", s.publicPage)
 	mux.Handle("GET /login", s.handle(s.loginForm))
 	mux.Handle("POST /login", s.handle(s.login))
 	mux.Handle("POST /logout", s.handle(s.logout))
@@ -177,6 +181,8 @@ var funcs = template.FuncMap{
 	},
 	"list":       func(xs ...int) []int { return xs },
 	"shortDate":  shortDate,
+	"eventDate":  eventDate,
+	"stepDate":   stepDate,
 	"actions":    func() []model.Action { return model.Actions },
 	"inProgress": func() []model.State { return model.InProgress },
 	"ago":        ago,
@@ -237,6 +243,39 @@ func shortDate(date, today string) string {
 		return d.Format("Jan 2")
 	}
 	return d.Format("Jan 2, 2006")
+}
+
+// stepDate formats a step's date for the history: "Sep 20" (with ", 2025"
+// when withYear), or for an approximate date "mid Sep" (" 2025").
+func stepDate(date string, approx, withYear bool) string {
+	d, err := time.Parse(model.DateLayout, date)
+	if err != nil {
+		return date
+	}
+	if approx {
+		part := "mid"
+		switch {
+		case d.Day() <= 10:
+			part = "early"
+		case d.Day() > 20:
+			part = "late"
+		}
+		s := part + " " + d.Format("Jan")
+		if withYear {
+			s += d.Format(" 2006")
+		}
+		return s
+	}
+	if withYear {
+		return d.Format("Jan 2, 2006")
+	}
+	return d.Format("Jan 2")
+}
+
+// eventDate formats one step's date on its own (e.g. the Undo button): the
+// year only when it isn't the current one.
+func eventDate(e db.Event, today string) string {
+	return stepDate(e.Date, e.Approximate, len(today) < 4 || len(e.Date) < 4 || e.Date[:4] != today[:4])
 }
 
 // flashCookie carries what was just done to the next home page view, which
@@ -581,6 +620,62 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 	return s.render(w, http.StatusOK, "home", data)
 }
 
+// seasonGroup is one season's pieces on the finished pieces page.
+type seasonGroup struct {
+	Season string
+	Pieces []db.Piece
+}
+
+// season names the season a date falls in: "Spring 2025" (March–May),
+// "Summer 2025", "Fall 2025", and "Winter 2025/26" (December–February).
+func season(date string) string {
+	d, err := time.Parse(model.DateLayout, date)
+	if err != nil {
+		return ""
+	}
+	y := d.Year()
+	switch m := d.Month(); {
+	case m >= time.March && m <= time.May:
+		return fmt.Sprintf("Spring %d", y)
+	case m >= time.June && m <= time.August:
+		return fmt.Sprintf("Summer %d", y)
+	case m >= time.September && m <= time.November:
+		return fmt.Sprintf("Fall %d", y)
+	case m == time.December:
+		return fmt.Sprintf("Winter %d/%02d", y, (y+1)%100)
+	default:
+		return fmt.Sprintf("Winter %d/%02d", y-1, y%100)
+	}
+}
+
+// finished lists every finished piece, most recently finished first,
+// grouped by season.
+func (s *Server) finished(w http.ResponseWriter, r *http.Request) error {
+	pieces, err := s.Store.PiecesInState(r.Context(), model.StateFinished)
+	if err != nil {
+		return err
+	}
+	sort.SliceStable(pieces, func(i, j int) bool {
+		if pieces[i].StateDate != pieces[j].StateDate {
+			return pieces[i].StateDate > pieces[j].StateDate
+		}
+		return pieces[i].ID > pieces[j].ID
+	})
+	var seasons []seasonGroup
+	for _, p := range pieces {
+		name := season(p.StateDate)
+		if len(seasons) == 0 || seasons[len(seasons)-1].Season != name {
+			seasons = append(seasons, seasonGroup{Season: name})
+		}
+		seasons[len(seasons)-1].Pieces = append(seasons[len(seasons)-1].Pieces, p)
+	}
+	data := struct {
+		Page
+		Seasons []seasonGroup
+	}{s.page(r, "Finished pieces"), seasons}
+	return s.render(w, http.StatusOK, "finished", data)
+}
+
 // sameState returns the other pieces in p's project that are in p's state:
 // the ones an action recorded on p can also be applied to.
 func sameState(proj db.Project, p db.Piece) []db.Piece {
@@ -690,6 +785,12 @@ func (s *Server) addEvent(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := s.Store.AddEvents(r.Context(), ids, action, date, details); err != nil {
 		return err
+	}
+	// Finishing can rate the pieces too (the next-step card offers it).
+	if action == model.Finished {
+		if err := s.rateFinished(r, ids); err != nil {
+			return err
+		}
 	}
 	// Work on the piece is done for now: back to the list of everything.
 	return redirectHome(w, r, url.Values{"marked": {joinIDs(ids)}, "action": {string(action)}})
@@ -818,10 +919,6 @@ func (s *Server) createFrom(w http.ResponseWriter, r *http.Request, projectID in
 	if err != nil {
 		return err
 	}
-	startID, err := formInt(r, "start_id", 0)
-	if err != nil {
-		return err
-	}
 	action, date, err := s.formEvent(r)
 	if err != nil {
 		return err
@@ -843,7 +940,6 @@ func (s *Server) createFrom(w http.ResponseWriter, r *http.Request, projectID in
 	}
 	ids, err := s.Store.CreatePieces(r.Context(), db.NewPieces{
 		Count:      int(count),
-		StartID:    startID,
 		ProjectID:  projectID,
 		Name:       strings.TrimSpace(r.FormValue("title")),
 		Form:       r.FormValue("form"),

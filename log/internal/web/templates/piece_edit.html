@@ -27,6 +27,8 @@
 
 {{template "photos" .Photos}}
 
+{{template "ratings" .}}
+
 <section>
   <h2>Measurements <span class="save-status" data-save-status aria-live="polite"></span></h2>
   <form method="post" action="/pieces/{{$p.ID}}/measurements" class="stack" data-autosave
@@ -53,7 +55,7 @@
 <section>
   <h2>Undo last step</h2>
   <form method="post" action="/pieces/{{$p.ID}}/events/{{.ID}}/delete" class="stack">
-    <button class="button" type="submit">Undo “{{.Action.Label}}” ({{shortDate .Date $.Today}})</button>
+    <button class="button" type="submit">Undo “{{.Action.Label}}” ({{eventDate . $.Today}})</button>
   </form>
 </section>
 {{end}}

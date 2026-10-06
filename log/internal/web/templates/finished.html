@@ -1,0 +1,13 @@
+{{define "content"}}
+<h1>Finished pieces</h1>
+{{range .Seasons}}
+<section class="group">
+  <h2>{{.Season}}</h2>
+  <div class="rows">
+    {{range .Pieces}}{{template "pieceRow" (dict "Piece" . "Today" $.Today "Dated" true)}}{{end}}
+  </div>
+</section>
+{{else}}
+<p class="empty">No finished pieces yet.</p>
+{{end}}
+{{end}}

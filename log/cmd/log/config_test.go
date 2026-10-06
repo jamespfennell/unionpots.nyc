@@ -43,13 +43,12 @@ func TestParseServe(t *testing.T) {
 		err  string
 	}{
 		{nil, ""},
-		{[]string{"-password-hash", hash, "-min-piece-id", "120"}, ""},
+		{[]string{"-password-hash", hash}, ""},
 		{[]string{"-password-hash", "plaintext"}, "isn't a bcrypt hash"},
 		{[]string{"-demo"}, ""},
 		{[]string{"-demo", "-spaces-bucket", "b"}, "-demo can't be combined with backup flags"},
 		{[]string{"-demo", "-backup-prefix", "demo"}, "-demo can't be combined with backup flags"},
 		{[]string{"-demo", "-password-hash", hash}, "-demo can't be combined with -password-hash"},
-		{[]string{"-min-piece-id", "0"}, "at least 1"},
 		{[]string{"extra"}, "unexpected argument"},
 	}
 	for _, c := range cases {

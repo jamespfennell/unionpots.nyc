@@ -40,10 +40,13 @@ func newApp(t *testing.T) *testApp {
 	if err := db.Migrate(context.Background(), sqlDB); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := sqlDB.Exec("UPDATE id_sequence SET next_piece_id = 120"); err != nil { // tests number from #120
+		t.Fatal(err)
+	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte("clay-pots"), bcrypt.MinCost)
 	now := func() time.Time { return time.Date(2026, 10, 3, 15, 0, 0, 0, time.UTC) }
 	s := &Server{
-		Store:  &db.Store{DB: sqlDB, MinPieceID: 120},
+		Store:  &db.Store{DB: sqlDB},
 		Auth:   &Auth{PasswordHash: hash, Secret: []byte(strings.Repeat("s", 32)), Now: now},
 		Backup: func() backup.Status { return backup.Status{} },
 		Photos: &photos.Store{Dir: t.TempDir()},
@@ -195,25 +198,10 @@ func TestCreateAdvanceAndBrowse(t *testing.T) {
 		t.Fatalf("#120 = %s; without the project option only #121 should move", p.State)
 	}
 
-	// Backfill an old finished piece.
-	rec = a.do("POST", "/new", url.Values{"action": {"broken"}, "start_id": {"#7"}, "date": {"2025-03-01"}})
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("backfill: status %d: %s", rec.Code, rec.Body)
-	}
-	if p, _ := a.store.GetPiece(ctx, 7); p.State != model.StateBroken {
-		t.Fatalf("#7 state = %q", p.State)
-	}
-
-	// Duplicate explicit ID is a 400 with the message shown.
-	rec = a.do("POST", "/new", url.Values{"action": {"thrown"}, "start_id": {"7"}})
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "piece #7 already exists") {
-		t.Fatalf("duplicate: status %d", rec.Code)
-	}
-
 	// Every page renders.
 	for _, path := range []string{
 		"/",
-		"/pieces/120", "/pieces/7", "/projects/1", "/new",
+		"/pieces/120", "/projects/1", "/new",
 	} {
 		if rec := a.do("GET", path, nil); rec.Code != http.StatusOK {
 			t.Errorf("GET %s: status %d: %s", path, rec.Code, rec.Body)
@@ -590,12 +578,13 @@ func TestRatings(t *testing.T) {
 	a.login()
 	ctx := context.Background()
 	a.do("POST", "/new", url.Values{"action": {"thrown"}})
-	if strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), "rating_glaze") {
-		t.Fatalf("ratings shouldn't show before the piece is finished")
-	}
 	a.do("POST", "/pieces/120/events", url.Values{"action": {"finished"}})
-	if !strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), `name="rating_glaze" value="5"`) {
-		t.Fatalf("ratings should show once finished")
+	// Unrated: only on the edit page.
+	if strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), "rating_glaze") {
+		t.Fatalf("unrated pieces shouldn't show ratings on the piece page")
+	}
+	if !strings.Contains(a.do("GET", "/pieces/120/edit", nil).Body.String(), `name="rating_glaze" value="5"`) {
+		t.Fatalf("the edit page always has ratings")
 	}
 	a.do("POST", "/pieces/120/ratings", url.Values{"rating_glaze": {"5"}, "rating_overall": {"4"}})
 	if r, _ := a.store.GetRatings(ctx, 120); r != (db.Ratings{Glaze: 5, Overall: 4}) {
@@ -918,5 +907,183 @@ func TestLogOutEverywhere(t *testing.T) {
 	}
 	if rec := a.do("POST", "/logout-everywhere", nil); rec.Code != 404 || rotated != 1 {
 		t.Errorf("demo: %d rotated=%d", rec.Code, rotated)
+	}
+}
+
+func TestApproximateDates(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	ids, err := a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Action: model.Thrown, Date: "2026-09-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.store.AddEvents(ctx, ids, model.Trimmed, "2026-09-08", db.StepDetails{}); err != nil {
+		t.Fatal(err)
+	}
+	// Only the notebook import sets the flag, directly in the database.
+	if _, err := a.store.DB.Exec("UPDATE events SET approximate = 1 WHERE action = 'trimmed'"); err != nil {
+		t.Fatal(err)
+	}
+	page := a.do("GET", "/pieces/120", nil).Body.String()
+	if !strings.Contains(page, `<span class="date" title="Approximate date">early Sep</span>`) {
+		t.Errorf("history should show the approximate date as early/mid/late")
+	}
+	if !strings.Contains(page, `<span class="date">Sep 1</span>
+        <span class="date">2026</span>`) {
+		t.Errorf("the first step always has its year")
+	}
+	if home := a.do("GET", "/", nil).Body.String(); !strings.Contains(home, `title="Approximate date">~`) {
+		t.Errorf("home row should mark an approximate state date")
+	}
+}
+
+func TestFinishedPieces(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	mk := func(name, thrown, finished string) {
+		ids, err := a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Name: name, Action: model.Thrown, Date: thrown})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if finished != "" {
+			if err := a.store.AddEvents(ctx, ids, model.Finished, finished, db.StepDetails{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	mk("Old bowl", "2024-03-01", "2024-05-02")
+	mk("New mug", "2026-01-01", "2026-02-03")
+	mk("Still drying", "2026-09-01", "")
+	mk("Newer plate", "2026-03-01", "2026-04-20")
+	if !strings.Contains(a.do("GET", "/", nil).Body.String(), `href="/finished">Finished pieces</a>`) {
+		t.Errorf("menu should link to Finished pieces")
+	}
+	body := a.do("GET", "/finished", nil).Body.String()
+	order := []string{"<h2>Spring 2026</h2>", "Newer plate", "Apr 20", "<h2>Winter 2025/26</h2>", "New mug", "Feb 3",
+		"<h2>Spring 2024</h2>", "Old bowl", "May 2"}
+	at := 0
+	for _, s := range order {
+		i := strings.Index(body[at:], s)
+		if i < 0 {
+			t.Fatalf("finished page: %q missing or out of order", s)
+		}
+		at += i
+	}
+	if strings.Contains(body, "Still drying") {
+		t.Errorf("unfinished pieces don't belong on the finished page")
+	}
+}
+
+func TestSeason(t *testing.T) {
+	for date, want := range map[string]string{
+		"2024-06-01": "Summer 2024", "2024-08-31": "Summer 2024", "2024-09-01": "Fall 2024",
+		"2024-12-05": "Winter 2024/25", "2025-02-28": "Winter 2024/25", "2025-03-01": "Spring 2025",
+		"1999-12-31": "Winter 1999/00",
+	} {
+		if got := season(date); got != want {
+			t.Errorf("season(%s) = %q, want %q", date, got, want)
+		}
+	}
+}
+
+func TestRateWhenFinishing(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	ids, err := a.store.CreatePieces(ctx, db.NewPieces{Count: 2, Action: model.Glazed, Date: "2026-10-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.store.SetRatings(ctx, ids[1], db.Ratings{Shape: 2})
+	page := a.do("GET", "/pieces/120", nil).Body.String()
+	card := page[strings.Index(page, `class="next-step"`):]
+	card = card[:strings.Index(card, "</form>")]
+	if !strings.Contains(card, `name="rating_overall" value="5"`) {
+		t.Fatal("the Mark finished card should offer ratings")
+	}
+	// Finish both (the other via "also"), rating glaze and overall.
+	rec := a.do("POST", "/pieces/120/events", url.Values{"action": {"finished"}, "also": {"121"},
+		"rating_glaze": {"4"}, "rating_overall": {"5"}})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("finish: %d %s", rec.Code, rec.Body)
+	}
+	if r, _ := a.store.GetRatings(ctx, 120); r != (db.Ratings{Glaze: 4, Overall: 5}) {
+		t.Errorf("#120 ratings = %+v", r)
+	}
+	if r, _ := a.store.GetRatings(ctx, 121); r != (db.Ratings{Glaze: 4, Shape: 2, Overall: 5}) {
+		t.Errorf("#121 keeps its shape rating: %+v", r)
+	}
+	// Other steps don't touch ratings.
+	ids, _ = a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Action: model.Thrown, Date: "2026-10-01"})
+	a.do("POST", fmt.Sprintf("/pieces/%d/events", ids[0]), url.Values{"action": {"trimmed"}, "rating_glaze": {"3"}})
+	if r, _ := a.store.GetRatings(ctx, ids[0]); r != (db.Ratings{}) {
+		t.Errorf("trimming shouldn't rate: %+v", r)
+	}
+}
+
+func TestPublicPage(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	ids, err := a.store.CreatePieces(ctx, db.NewPieces{Count: 2, Name: "Macrocosmos Planters", Action: model.Thrown,
+		Date: "2026-04-18", Form: "planter", ClayWeight: 6.5, Dims: model.Dims{H: 6, W: 10, D: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clay, _ := a.store.EnsureClay(ctx, "Speckle")
+	a.store.SetPieceClays(ctx, ids[0], []int64{clay})
+	a.store.AddEvents(ctx, ids, model.Glazed, "2026-05-15", db.StepDetails{GlazeText: "Floating Blue"})
+	a.store.AddEvents(ctx, ids[:1], model.Finished, "2026-05-22", db.StepDetails{Dims: model.Dims{H: 5, W: 9.25, D: 9.25}})
+	a.store.AddEvents(ctx, ids[1:], model.Finished, "2026-05-23", db.StepDetails{})
+	a.store.UpdatePieceNotes(ctx, ids[0], "SECRET NOTE")
+	a.store.SetRatings(ctx, ids[0], db.Ratings{Glaze: 5, Shape: 5, Overall: 5})
+	a.upload("/pieces/120/photos", false, map[string][]byte{"a.jpg": jpegBytes(t, 40, 30)})
+	if !strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), `href="/p/120"`) {
+		t.Errorf("the piece page should link to its public page")
+	}
+	a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Action: model.Thrown, Date: "2026-09-01"}) // #122, unfinished
+
+	a.cookie = nil // public: no login
+	rec := a.do("GET", "/p/120", nil)
+	body := rec.Body.String()
+	if rec.Code != 200 {
+		t.Fatalf("public page: %d", rec.Code)
+	}
+	for _, want := range []string{"union<br>pots</a></h1>", `<p class="number">#120</p>`,
+		"<dt>project</dt><dd>macrocosmos planters, 1/2</dd>", "planter", "6.5 lb of speckle clay",
+		"<dd>floating blue</dd>", "<dt>size</dt><dd>5 × 9.25 × 9.25 in</dd>", "<h2>production<br>timeline</h2>",
+		"<dt>thrown</dt><dd>Apr 18, 2026</dd>", "<dt>glazed</dt><dd>May 15</dd>", "<dt>finished</dt><dd>May 22</dd>",
+		`<a href="https://unionpots.nyc">unionpots.nyc</a>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("public page should show %q", want)
+		}
+	}
+	for _, private := range []string{"SECRET NOTE", "rating", "Rating", "/pieces/", "<img", ".jpg", "spring 2026"} {
+		if strings.Contains(body, private) {
+			t.Errorf("public page must not show %q", private)
+		}
+	}
+	a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Name: "Random bowl", Action: model.Finished, Date: "2026-05-01"})
+	if body := a.do("GET", "/p/123", nil).Body.String(); !strings.Contains(body, "<dt>name</dt><dd>random bowl</dd>") {
+		t.Errorf("a single piece has a name")
+	}
+	// Sizes before firing are never shown.
+	if body := a.do("GET", "/p/121", nil).Body.String(); strings.Contains(body, "<dt>size") {
+		t.Errorf("without a finished size, no size is shown")
+	}
+	for _, path := range []string{"/p/122", "/p/999"} {
+		if rec := a.do("GET", path, nil); rec.Code != 404 {
+			t.Errorf("%s: %d, want 404", path, rec.Code)
+		}
+	}
+	p120, _ := a.store.PiecePhotos(ctx, 120)
+	if rec := a.do("GET", "/p/120/"+p120[0].SHA256+"_1600.jpg", nil); rec.Code == 200 {
+		t.Errorf("photos aren't public")
+	}
+	a.srv.Demo = true
+	if rec := a.do("GET", "/p/120", nil); rec.Code != 404 {
+		t.Errorf("no public pages in the demo: %d", rec.Code)
 	}
 }

@@ -1,7 +1,7 @@
 {{define "content"}}
 {{$p := .Piece}}
 <h1>#{{$p.ID}}{{with $p.Label}} {{.}}{{end}}</h1>
-<p class="status">{{$p.State.Label}}</p>
+<p class="status">{{$p.State.Label}}{{with .PublicURL}} · <a href="{{.}}" hx-boost="false">public page</a>{{end}}</p>
 {{if .ShowProject}}<p class="part-of">Part of the <a href="/projects/{{.Project.ID}}">{{.Project.DisplayName}}</a> project</p>{{end}}
 
 {{with $p.State.Next}}
@@ -9,7 +9,8 @@
 <form method="post" action="/pieces/{{$p.ID}}/events" class="next-step">
   {{if not $choice}}<input type="hidden" name="action" value="{{.}}">{{end}}
   <input type="hidden" name="date" value="{{$.Today}}">
-  {{if or $.Siblings $.NextDims $.NextGlazes $choice}}
+  {{$finishing := eq $p.State.Next "finished"}}
+  {{if or $.Siblings $.NextDims $.NextGlazes $choice $finishing}}
   <div class="next-step-body">
     {{if $choice}}
     {{/* A started piece moves on by being thrown or built. */}}
@@ -24,6 +25,7 @@
     </fieldset>
     {{end}}
     {{if $.NextGlazes}}{{template "glazeInputs" (dict "Names" $.GlazeNames)}}{{end}}
+    {{if $finishing}}{{template "ratingPills" $.Ratings}}{{end}}
     {{with $.NextDims}}
       {{if eq $p.State.Next "finished"}}
       <details class="disclosure inline">
@@ -61,37 +63,19 @@
 <section>
   <h2>History</h2>
   <ol class="history">
-    {{range .Events}}
+    {{range .History}}
     <li>
       <span class="history-step">
-        <span>{{.Action.Label}}</span>
-        <span class="date">{{shortDate .Date $.Today}}</span>
+        <span>{{.Label}}</span>
+        <span class="date"{{if .Approximate}} title="Approximate date"{{end}}>{{.Date}}</span>
+        {{with .Year}}<span class="date">{{.}}</span>{{end}}
       </span>
     </li>
     {{end}}
   </ol>
 </section>
 
-{{with .Ratings}}
-<section>
-  <h2>Ratings <span class="save-status" data-save-status aria-live="polite"></span></h2>
-  <form method="post" action="/pieces/{{$p.ID}}/ratings" class="stack" data-autosave
-        hx-post="/pieces/{{$p.ID}}/ratings" hx-trigger="change, submit" hx-swap="none">
-    <input type="hidden" name="autosave" value="1">
-    {{range .}}
-    {{$row := .}}
-    <fieldset class="pills rating">
-      <legend>{{.Label}}</legend>
-      <div class="pill-row">
-        {{range $n := (list 1 2 3 4 5)}}
-        <label class="pill"><input type="radio" name="rating_{{$row.Name}}" value="{{$n}}" class="visually-hidden" data-toggle-off{{if eq $n $row.Value}} checked{{end}}><span>{{$n}}</span></label>
-        {{end}}
-      </div>
-    </fieldset>
-    {{end}}
-  </form>
-</section>
-{{end}}
+{{if .RatingsSet}}{{template "ratings" .}}{{end}}
 
 
 <section>

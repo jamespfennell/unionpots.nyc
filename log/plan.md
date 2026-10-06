@@ -21,7 +21,7 @@ document is the source of truth for decisions made so far.
 | Glazes | Typed list of glazes used + optional free-text "application notes" for complex cases. |
 | Firing details | Omitted for now (studio uses standard firings). Easy to add later as a typed field. |
 | Ownership | Dropped (not tracked). |
-| IDs | Piece ID = the number marked on the piece. Never reused. Automatic numbering starts at a configurable minimum (120 in production). No QR codes. |
+| IDs | Piece ID = the number marked on the piece. Never reused. Numbering starts at #1; the notebook's pieces (#1–#142) were imported in order onto a fresh log, so they kept their numbers. No QR codes. |
 | Stale-piece reminders | Not wanted. Instead: list all pieces in a given state. |
 | OCR of notebooks | Deferred to v3. |
 
@@ -36,12 +36,9 @@ document is the source of truth for decisions made so far.
 - A **piece** has a globally unique integer ID — the number written on its base.
   - New pieces get the next number from a monotonic counter (`id_sequence`), so
     deleting #130 never causes #130 to be handed out again.
-  - When backfilling history, an explicit ID can be entered if unused.
-  - Automatic numbering starts at `serve -min-piece-id`
-    (120 in production, so the first piece logged in the app is #120;
-    default 1). It's a floor: the stored counter only moves forward, so
-    numbers are never reused. Historical pieces (#1–#119) are backfilled
-    with explicit IDs.
+  - Numbering starts at #1. There is no way to choose a number: the
+    notebook backfill (M5) creates pieces in notebook order on an empty log,
+    so the counter hands out the same numbers.
 - Single-piece projects are the common case, so the UI hides the project:
   "New piece" silently creates a project; the project page only appears once a
   project has 2+ pieces (or has a name).
@@ -303,8 +300,7 @@ Mobile-first. One column on phones, two on desktop. htmx for partial updates
 5. **New piece** (`/new`): how many (1–4 pills or a number), name, form,
    clay (pills), clay weight, status (Started / Thrown / Built), thrown size
    (only for Thrown), a different date if needed. Lands on Home with a
-   "Created #…" notice. Backfilling old pieces is no longer offered here;
-   how to do it is to be decided (see M5).
+   "Created #…" notice.
 6. **Search** (`/search`) — filters: state, form, clay, glaze, minimum
    rating per dimension, date range (any event, or a specific action), free
    text (names, notes, glaze notes, free-form values), and free-form
@@ -373,7 +369,7 @@ Everything is a command-line flag; no environment variables (the README has
 the full list). Storage flags (`-data-dir`, `-spaces-*`, `-backup-prefix`,
 `-backup-dir`) are shared by every command and may come before the command,
 so a compose `entrypoint` can hold them for both `serve` and `restore`.
-`serve` adds `-addr`, `-password-hash`, `-min-piece-id`, `-allow-empty-db`
+`serve` adds `-addr`, `-password-hash`, `-allow-empty-db`
 and `-demo`. With no flags at all the app runs: default password, no
 backups, each with a banner. (v2 will add a public base URL flag.)
 
@@ -642,16 +638,30 @@ inheritance, no ownership; every piece holds its own values)
 - Search page, clay/glaze library with shrinkage stats.
 - Export zip, `rename-key` and vocab merge.
 
-**M5 — Backfill**
-- Enter the ~120 historical pieces from the notebook. **How is TBD**: the
-  in-form "backfill" mode was removed from the New page. The server still
-  accepts an explicit piece number (`start_id`) for whatever replaces it.
-- If entry is too slow, add a desktop "spreadsheet-style" bulk form or CSV
-  import.
+**M5 — Backfill** (a one-off; no backfill code in the app)
+- `notebook.md` is the handwritten notebook transcribed as written (#1–#142)
+  and kept as the permanent record.
+- It's interpreted into a structured import file (every reading and
+  correction with a reason), reviewed, then loaded by a throwaway script
+  through the app's normal forms onto a **fresh, empty log**, in number
+  order, so the pieces keep their notebook numbers (the script checks each).
+  Projects with gaps (#115–#117 + #120–#122) are created, then extended.
+- Missing dates are filled in at 7 days per step (back from the first known
+  date, forward to Finished, evenly between known dates) and flagged
+  **approximate** (migration 006; shown as "~Mar 13"). Pieces end Finished
+  unless the notebook says broken or gives a current stage.
+- The import is rehearsed locally; the resulting data directory becomes
+  production's.
 
-**v2 — Public pages**
-- `unionpots.nyc/p/{id}`, per-piece and per-photo public toggles, reverse
-  proxy route.
+**v2 — Public pages** (first version done)
+- ✓ `/p/{id}` on the log, no login: every **finished** piece (anything else,
+  and everything in the demo, is "not found"). Styled after unionpots.nyc
+  (Spectral, one colour, centered), not the log. Text only, no photos:
+  number, name (a set: "project — big bowls, 2/2"), form, clay and weight, glaze text, finished
+  size (sizes before firing are never shown), then the production timeline (the
+  step history, approximate dates as "mid May"). Never ratings or notes.
+- Later: serve it as `unionpots.nyc/p/{id}` (reverse proxy route), and a
+  per-piece public switch if some shouldn't be public.
 
 **v3 — Notebook OCR**
 - Photograph a notebook page and send it to a vision LLM, which returns

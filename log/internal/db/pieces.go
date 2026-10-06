@@ -23,10 +23,6 @@ func userErr(format string, args ...any) error {
 
 type Store struct {
 	DB *sql.DB
-	// MinPieceID is the lowest number given to a new piece automatically
-	// (e.g. to continue an existing notebook's numbering). Explicit
-	// backfill IDs may be lower. 0 or 1 means start at #1.
-	MinPieceID int64
 }
 
 type Piece struct {
@@ -35,6 +31,9 @@ type Piece struct {
 	Notes     string
 	State     model.State
 	StateDate string // date of the latest event, when it entered its state
+	// StateDateApprox: that date is approximate (filled in by the notebook
+	// import).
+	StateDateApprox bool
 
 	ProjectName  string // "" if the project is unnamed
 	ProjectSize  int    // number of pieces in the project
@@ -62,10 +61,11 @@ func (p Piece) Title() string {
 }
 
 type Event struct {
-	ID      int64
-	PieceID int64
-	Action  model.Action
-	Date    string
+	ID          int64
+	PieceID     int64
+	Action      model.Action
+	Date        string
+	Approximate bool // the date is a guess (see migration 006)
 }
 
 type Project struct {
@@ -103,7 +103,6 @@ func (p Project) DisplayName() string {
 // NewPieces describes pieces to create together.
 type NewPieces struct {
 	Count     int
-	StartID   int64        // 0 = allocate from the sequence; otherwise consecutive explicit IDs (backfill)
 	ProjectID int64        // 0 = create a new project
 	Name      string       // name of the new project; ignored when adding to an existing one
 	Action    model.Action // how the pieces start, e.g. thrown
@@ -116,9 +115,8 @@ type NewPieces struct {
 	Dims       model.Dims
 }
 
-// NextPieceID is the number the next automatically numbered piece will get:
-// the stored counter (which only moves forward, so numbers are never
-// reused), but at least MinPieceID.
+// NextPieceID is the number the next piece will get: the stored counter,
+// which only moves forward, so numbers are never reused.
 func (s *Store) NextPieceID(ctx context.Context) (int64, error) {
 	return s.nextPieceID(ctx, s.DB)
 }
@@ -130,7 +128,7 @@ func (s *Store) nextPieceID(ctx context.Context, q interface {
 	if err := q.QueryRowContext(ctx, "SELECT next_piece_id FROM id_sequence").Scan(&next); err != nil {
 		return 0, err
 	}
-	return max(next, s.MinPieceID, 1), nil
+	return max(next, 1), nil
 }
 
 // CreatePieces creates pieces, each with an initial event, and returns
@@ -142,34 +140,18 @@ func (s *Store) CreatePieces(ctx context.Context, np NewPieces) ([]int64, error)
 	if _, err := model.ParseAction(string(np.Action)); err != nil {
 		return nil, &UserError{err.Error()}
 	}
-	if np.StartID < 0 {
-		return nil, userErr("piece IDs must be positive")
-	}
 	ts := now()
 	return withTx(ctx, s.DB, func(tx *sql.Tx) ([]int64, error) {
 		next, err := s.nextPieceID(ctx, tx)
 		if err != nil {
 			return nil, err
 		}
-		start := np.StartID
-		if start == 0 {
-			start = next
-		}
 		ids := make([]int64, np.Count)
 		for i := range ids {
-			ids[i] = start + int64(i)
-			var exists bool
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM pieces WHERE id = ?)", ids[i]).Scan(&exists); err != nil {
-				return nil, err
-			}
-			if exists {
-				return nil, userErr("piece #%d already exists", ids[i])
-			}
+			ids[i] = next + int64(i)
 		}
-		if end := start + int64(np.Count); end > next {
-			if _, err := tx.ExecContext(ctx, "UPDATE id_sequence SET next_piece_id = ?", end); err != nil {
-				return nil, err
-			}
+		if _, err := tx.ExecContext(ctx, "UPDATE id_sequence SET next_piece_id = ?", next+int64(np.Count)); err != nil {
+			return nil, err
 		}
 
 		projectID := np.ProjectID
@@ -255,13 +237,15 @@ const pieceColumns = `p.id, p.project_id, p.notes, p.state,
 	          ORDER BY occurred_on DESC, id DESC LIMIT 1), ''),
 	COALESCE((SELECT name FROM projects pr WHERE pr.id = p.project_id), ''),
 	(SELECT COUNT(*) FROM pieces q WHERE q.project_id = p.project_id),
-	(SELECT COUNT(*) FROM pieces q WHERE q.project_id = p.project_id AND q.id <= p.id)`
+	(SELECT COUNT(*) FROM pieces q WHERE q.project_id = p.project_id AND q.id <= p.id),
+	COALESCE((SELECT approximate FROM events e WHERE e.piece_id = p.id
+	          ORDER BY occurred_on DESC, id DESC LIMIT 1), 0)`
 
 func scanPiece(row interface{ Scan(...any) error }) (Piece, error) {
 	var p Piece
 	err := row.Scan(&p.ID, &p.ProjectID, &p.Notes, &p.State,
 		&p.Public, &p.CreatedAt, &p.UpdatedAt, &p.StateDate,
-		&p.ProjectName, &p.ProjectSize, &p.ProjectIndex)
+		&p.ProjectName, &p.ProjectSize, &p.ProjectIndex, &p.StateDateApprox)
 	return p, err
 }
 
@@ -297,7 +281,7 @@ func (s *Store) PiecesInState(ctx context.Context, state model.State) ([]Piece, 
 
 func (s *Store) PieceEvents(ctx context.Context, pieceID int64) ([]Event, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT id, piece_id, action, occurred_on
+		SELECT id, piece_id, action, occurred_on, approximate
 		FROM events WHERE piece_id = ? ORDER BY occurred_on ASC, id ASC`, pieceID)
 	if err != nil {
 		return nil, err
@@ -306,7 +290,7 @@ func (s *Store) PieceEvents(ctx context.Context, pieceID int64) ([]Event, error)
 	var es []Event
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.ID, &e.PieceID, &e.Action, &e.Date); err != nil {
+		if err := rows.Scan(&e.ID, &e.PieceID, &e.Action, &e.Date, &e.Approximate); err != nil {
 			return nil, err
 		}
 		es = append(es, e)

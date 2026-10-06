@@ -115,7 +115,10 @@ func TestMigration5GlazeText(t *testing.T) {
 	if err := migrateTo(ctx, sqlDB, 4); err != nil {
 		t.Fatal(err)
 	}
-	s := &Store{DB: sqlDB, MinPieceID: 120}
+	if _, err := sqlDB.Exec("UPDATE id_sequence SET next_piece_id = 120"); err != nil { // tests number from #120
+		t.Fatal(err)
+	}
+	s := &Store{DB: sqlDB}
 	create(t, s, NewPieces{Count: 3})
 	for _, q := range []string{
 		`INSERT INTO metadata (piece_id, key, value, updated_at) VALUES

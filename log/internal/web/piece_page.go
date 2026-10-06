@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -14,6 +15,7 @@ type piecePage struct {
 	Page
 	Piece        db.Piece
 	Events       []db.Event
+	History      []historyStep
 	Project      db.Project
 	ShowProject  bool
 	Siblings     []db.Piece     // same project and state; an action can apply to them too
@@ -21,8 +23,9 @@ type piecePage struct {
 	NextOptions  []model.Action // ways on from here; a started piece can be thrown or built
 	NextDims     []dimsRow      // dimension inputs for the next step, if it is measured
 	NextGlazes   bool           // the next step is glazing, so the card asks for glazes
-	Ratings      []ratingRow
-	Facts        []fact // read-only details on the piece page
+	Ratings      []ratingRow    // always, for the edit page
+	RatingsSet   bool           // any rating given: also shown on the piece page
+	Facts        []fact         // read-only details on the piece page
 	Measurements db.Measurements
 	StepDims     []dimsRow // the measurements form: one row per measured step
 	Clays        []db.Clay // all clay bodies, for the pills
@@ -31,6 +34,7 @@ type piecePage struct {
 	GlazeNames   []string // known glazes, recognised in glaze text and suggested while typing
 	ShowGlazes   bool     // the edit page offers the glaze text once the piece is (being) glazed
 	Photos       photoSection
+	PublicURL    string // the public page, once finished (not in the demo)
 }
 
 // fact is one read-only detail: a label and one or more values, optionally
@@ -127,9 +131,8 @@ func (s *Server) loadPiecePage(r *http.Request) (*piecePage, error) {
 	for _, st := range measureSteps(events, m) {
 		pp.StepDims = append(pp.StepDims, dimsRow{Key: string(st.Action), Label: sizeLabel(st.Action), Dims: st.Dims})
 	}
-	if p.State == model.StateFinished || ratings != (db.Ratings{}) {
-		pp.Ratings = ratingRows(ratings)
-	}
+	pp.Ratings, pp.RatingsSet = ratingRows(ratings), ratings != (db.Ratings{})
+	pp.History = history(pp.Events)
 	if len(events) > 1 {
 		pp.Undo = &events[len(events)-1]
 	}
@@ -138,6 +141,9 @@ func (s *Server) loadPiecePage(r *http.Request) (*piecePage, error) {
 		return pp, err
 	}
 	pp.Photos.PieceID, pp.Photos.Demo = p.ID, s.Demo
+	if p.State == model.StateFinished && !s.Demo {
+		pp.PublicURL = fmt.Sprintf("/p/%d", p.ID)
+	}
 	return pp, nil
 }
 
@@ -242,4 +248,25 @@ func (s *Server) pieceEdit(w http.ResponseWriter, r *http.Request) error {
 	pp.Title = "Edit " + pp.Piece.Title()
 	pp.Photos.Edit = true
 	return s.render(w, http.StatusOK, "piece_edit", pp)
+}
+
+// historyStep is one step in the piece page's history.
+type historyStep struct {
+	Label       string
+	Date        string // "Feb 14", or "mid March" if approximate
+	Year        string // on its own line: the first step's, then only when it changes
+	Approximate bool
+}
+
+// history labels each step's date. The first step always shows its year;
+// later ones only when it changes.
+func history(events []db.Event) []historyStep {
+	steps := make([]historyStep, len(events))
+	for i, e := range events {
+		steps[i] = historyStep{Label: e.Action.Label(), Date: stepDate(e.Date, e.Approximate, false), Approximate: e.Approximate}
+		if len(e.Date) >= 4 && (i == 0 || len(events[i-1].Date) < 4 || e.Date[:4] != events[i-1].Date[:4]) {
+			steps[i].Year = e.Date[:4]
+		}
+	}
+	return steps
 }

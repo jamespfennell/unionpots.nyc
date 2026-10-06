@@ -1,11 +1,12 @@
 {{/* A piece in a list: number, label, how long it has been in its state, and
      optionally the state itself. Args: Piece, Today, ShowState, HideLabel
-     (on the project page, where the project name would repeat). */}}
+     (on the project page, where the project name would repeat), Dated (the
+     date it entered its state, "May 22", instead of "3 days ago"). */}}
 {{define "pieceRow"}}
 {{with .Piece}}
 <a class="row" href="/pieces/{{.ID}}">
   <span class="pid">#{{.ID}}</span>
-  <span class="row-main">{{if not $.HideLabel}}{{with .Label}}<span class="name">{{.}}</span>{{end}}{{end}}<span class="ago">{{daysAgo .StateDate $.Today}}</span></span>
+  <span class="row-main">{{if not $.HideLabel}}{{with .Label}}<span class="name">{{.}}</span>{{end}}{{end}}<span class="ago"{{if .StateDateApprox}} title="Approximate date"{{end}}>{{if $.Dated}}{{stepDate .StateDate .StateDateApprox false}}{{else}}{{if .StateDateApprox}}~{{end}}{{daysAgo .StateDate $.Today}}{{end}}</span></span>
   {{if $.ShowState}}<span class="row-end">{{.State.Label}}</span>{{end}}
 </a>
 {{end}}
@@ -125,4 +126,32 @@
   </form>
   {{end}}
 </section>
+{{end}}
+
+{{/* Ratings, 1–5 pills each, autosaved. Tapping the chosen number again
+     clears it. Args: the piece page. */}}
+{{define "ratings"}}
+<section>
+  <h2>Ratings <span class="save-status" data-save-status aria-live="polite"></span></h2>
+  <form method="post" action="/pieces/{{.Piece.ID}}/ratings" class="stack" data-autosave
+        hx-post="/pieces/{{.Piece.ID}}/ratings" hx-trigger="change, submit" hx-swap="none">
+    <input type="hidden" name="autosave" value="1">
+    {{template "ratingPills" .Ratings}}
+  </form>
+</section>
+{{end}}
+
+{{/* The 1–5 pills for each rating. Args: []ratingRow. */}}
+{{define "ratingPills"}}
+{{range .}}
+{{$row := .}}
+<fieldset class="pills rating">
+  <legend>{{.Label}}</legend>
+  <div class="pill-row">
+    {{range $n := (list 1 2 3 4 5)}}
+    <label class="pill"><input type="radio" name="rating_{{$row.Name}}" value="{{$n}}" class="visually-hidden" data-toggle-off{{if eq $n $row.Value}} checked{{end}}><span>{{$n}}</span></label>
+    {{end}}
+  </div>
+</fieldset>
+{{end}}
 {{end}}

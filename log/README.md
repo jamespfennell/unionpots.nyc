@@ -50,7 +50,6 @@ is due and the backup before it fails.
 |---|---|
 | `-addr` | Listen address. Default `:8080`. |
 | `-password-hash` | bcrypt hash from `log hash-password`. Without it the password is `potter`, with a banner warning about it. |
-| `-min-piece-id` | Lowest number given to a new piece automatically (default 1). Numbers already used are never reused, and backfill can still use lower ones. |
 | `-allow-empty-db` | Start with an empty database even though backups exist. |
 | `-demo` | Demo mode: the password `potter` is shown on the login page, the log resets to sample pieces at startup and every day, and photos can't be added or removed. Can't be combined with backup flags or `-password-hash`. |
 
@@ -102,7 +101,6 @@ One-time setup:
          - serve
          # Compose interpolates $, so every $ in the bcrypt hash is doubled.
          - -password-hash=$$2a$$10$$...
-         - -min-piece-id=120   # first automatic piece number
        volumes:
          - ./data:/data
        ports:

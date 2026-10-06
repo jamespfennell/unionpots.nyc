@@ -22,7 +22,7 @@ func TestResetLoadsSampleDataAndWipesChanges(t *testing.T) {
 	if err := db.Migrate(ctx, sqlDB); err != nil {
 		t.Fatal(err)
 	}
-	s := &db.Store{DB: sqlDB, MinPieceID: 1}
+	s := &db.Store{DB: sqlDB}
 	files := &photos.Store{Dir: filepath.Join(dir, "photos")}
 	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 

@@ -86,7 +86,6 @@ type serveOptions struct {
 	storage
 	Addr         string
 	PasswordHash string
-	MinPieceID   int64
 	AllowEmptyDB bool
 	Demo         bool
 }
@@ -97,15 +96,12 @@ func parseServe(st storage, args []string) (serveOptions, error) {
 	o.addFlags(fs)
 	fs.StringVar(&o.Addr, "addr", ":8080", "listen address")
 	fs.StringVar(&o.PasswordHash, "password-hash", "", `bcrypt hash of the password, from "log hash-password" (default: the password "`+DefaultPassword+`", with a warning)`)
-	fs.Int64Var(&o.MinPieceID, "min-piece-id", 1, "lowest number given to a new piece automatically")
 	fs.BoolVar(&o.AllowEmptyDB, "allow-empty-db", false, "start with an empty database even though backups exist")
 	fs.BoolVar(&o.Demo, "demo", false, `demo mode: password "`+DefaultPassword+`" shown on the login page, sample data reset daily, no photo uploads; no backups or -password-hash allowed`)
 	fs.Parse(args)
 	switch {
 	case fs.NArg() > 0:
 		return o, fmt.Errorf("unexpected argument %q", fs.Arg(0))
-	case o.MinPieceID < 1:
-		return o, errors.New("-min-piece-id must be at least 1")
 	case o.Demo && o.anyBackupFlag():
 		return o, errors.New("-demo can't be combined with backup flags: the demo is never backed up")
 	case o.Demo && o.PasswordHash != "":
@@ -201,7 +197,7 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 		return err
 	}
 
-	pieces := &db.Store{DB: sqlDB, MinPieceID: o.MinPieceID}
+	pieces := &db.Store{DB: sqlDB}
 	files := &photos.Store{Dir: o.photoDir()}
 	backupCtx, stopBackups := context.WithCancel(context.Background())
 	defer stopBackups()
@@ -268,7 +264,7 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", o.Addr, "data", o.DataDir, "min_piece_id", o.MinPieceID, "demo", o.Demo, "version", versionText())
+		logger.Info("listening", "addr", o.Addr, "data", o.DataDir, "demo", o.Demo, "version", versionText())
 		errc <- httpServer.ListenAndServe()
 	}()
 
