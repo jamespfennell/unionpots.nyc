@@ -402,9 +402,12 @@ real log.
   `-allow-empty-db`". If the bucket can't be reached to check, it also
   refuses (this is the disaster-recovery moment). That stops a mis-mounted volume from silently
   starting fresh (and then backing up an empty DB).
-- CI: add a second job to `.github/workflows/build.yml` that runs
-  `go test ./...` and builds and pushes `jamespfennell/log.unionpots.nyc:latest`
-  (path-filtered on `log/**`).
+- CI: one workflow, `.github/workflows/ci.yml`, with two jobs: the website
+  image and the log image (`go vet`, `go test`, then build and push
+  `jamespfennell/log.unionpots.nyc:latest`). Both build on every push, so
+  each commit has a single run that finishes only when both images are
+  pushed: the rollout deploys when a run finishes, and with two separate
+  workflows it once deployed before the log image existed.
 - VM: a Docker Compose service `log.unionpots.nyc` with `./data` mounted at `/data` (see README).
 - DNS: `log.unionpots.nyc` A record pointing at the VM.
 - TLS and routing: the existing front Caddy on the VM gets two additions.
