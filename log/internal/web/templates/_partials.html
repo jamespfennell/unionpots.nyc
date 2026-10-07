@@ -44,14 +44,21 @@
 
 {{/* Clay body pills (several can be chosen). The label links to the clay
      list, where clay bodies are added and edited. Args: Clays, Selected. */}}
+{{/* Clay pills. A piece is almost always one clay, so tapping a clay
+     deselects the others; "+ another clay" allows several (and a piece that
+     already has several starts that way). Without the script they're plain
+     checkboxes. Args: Clays, Selected (ids). */}}
 {{define "clayPills"}}
-<fieldset class="pills">
+<fieldset class="pills" data-clay-pills{{if gt (len .Selected) 1}} data-multi{{end}}>
   <legend>Clay <span class="legend-link">(<a href="/clays">manage clays</a>)</span></legend>
   <div class="pill-row">
     {{range .Clays}}
     <label class="pill"><input type="checkbox" name="clay" value="{{.ID}}" class="visually-hidden"{{if hasID $.Selected .ID}} checked{{end}}><span>{{.Name}}</span></label>
     {{end}}
   </div>
+  {{if and (gt (len .Clays) 1) (le (len .Selected) 1)}}
+  <button type="button" class="link-button clay-multi" data-clay-multi>+ another clay</button>
+  {{end}}
 </fieldset>
 {{end}}
 

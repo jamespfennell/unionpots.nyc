@@ -247,6 +247,7 @@ input:focus, select:focus, textarea:focus, .button:focus-visible, summary:focus-
   cursor: pointer;
   user-select: none;
 }
+.clay-multi { margin-top: 0.6rem; }
 .pill-custom { display: inline-flex; align-items: center; gap: 0.5rem; }
 .pill-custom input[type="number"] { width: 5.5rem; min-height: 40px; border-radius: 999px; text-align: center; }
 .pill-custom input[type="radio"]:checked ~ input[type="number"] { border-color: var(--accent); outline: 1px solid var(--accent); }

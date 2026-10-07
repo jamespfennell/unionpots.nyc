@@ -326,6 +326,24 @@
     next(0);
   });
 
+  // Clay pills: one clay unless "+ another clay" was tapped. This runs in the
+  // capture phase, before htmx's autosave reads the form, so only the new
+  // choice is saved.
+  document.addEventListener("change", function (e) {
+    var input = e.target;
+    var pills = input.matches && input.matches('input[name="clay"]') && input.closest("[data-clay-pills]");
+    if (!pills || !input.checked || pills.hasAttribute("data-multi")) return;
+    pills.querySelectorAll('input[name="clay"]').forEach(function (other) {
+      if (other !== input) other.checked = false;
+    });
+  }, true);
+  document.addEventListener("click", function (e) {
+    var link = e.target.closest && e.target.closest("[data-clay-multi]");
+    if (!link) return;
+    link.closest("[data-clay-pills]").setAttribute("data-multi", "");
+    link.hidden = true;
+  });
+
   // The menu closes when you tap anywhere else.
   document.addEventListener("click", function (e) {
     document.querySelectorAll("details[data-menu][open]").forEach(function (m) {

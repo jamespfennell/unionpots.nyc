@@ -1280,3 +1280,26 @@ func TestHomeOmitsEmptySections(t *testing.T) {
 		}
 	}
 }
+
+func TestClayPillsOneByDefault(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	brown, _ := a.store.EnsureClay(ctx, "Brown")
+	black, _ := a.store.EnsureClay(ctx, "Black")
+	page := a.do("GET", "/new", nil).Body.String()
+	if !strings.Contains(page, `<fieldset class="pills" data-clay-pills>`) || !strings.Contains(page, "+ another clay") {
+		t.Errorf("New should offer one clay, with + another clay")
+	}
+	// A piece with two clays starts in multi mode, without the link.
+	ids, _ := a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Action: model.Thrown, Date: "2026-10-01", ClayIDs: []int64{brown, black}})
+	edit := a.do("GET", fmt.Sprintf("/pieces/%d/edit", ids[0]), nil).Body.String()
+	if !strings.Contains(edit, `data-clay-pills data-multi>`) || strings.Contains(edit, "+ another clay") {
+		t.Errorf("a piece with two clays should start in multi mode")
+	}
+	// The server still accepts several.
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "clay": {fmt.Sprint(brown), fmt.Sprint(black)}})
+	if cs, _ := a.store.PieceClays(ctx, ids[0]+1); len(cs) != 2 {
+		t.Errorf("several clays: %+v", cs)
+	}
+}
