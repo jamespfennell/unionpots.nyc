@@ -34,7 +34,7 @@
         <a href="/glazes">Glazes</a>
         <hr>
         <a href="/backups">Backups</a>
-        <a href="/ideas">App ideas</a>
+        {{if .AppIdeas}}<a href="/ideas">App ideas</a>{{end}}
         <form method="post" action="/logout" hx-boost="false"><button type="submit">Log out</button></form>
         {{if .LogOutEverywhere}}
         <form method="post" action="/logout-everywhere" hx-boost="false"

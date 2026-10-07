@@ -1425,3 +1425,20 @@ func TestStudioFilterWithoutAll(t *testing.T) {
 		t.Errorf("the selected studio's link should deselect it")
 	}
 }
+
+func TestNoAppIdeasInDemo(t *testing.T) {
+	a := newApp(t)
+	a.srv.Demo = true
+	a.login()
+	if strings.Contains(a.do("GET", "/", nil).Body.String(), `href="/ideas"`) {
+		t.Errorf("the demo's menu has no App ideas")
+	}
+	for _, req := range [][2]string{{"GET", "/ideas"}, {"POST", "/ideas"}, {"POST", "/ideas/1"}, {"POST", "/ideas/1/delete"}, {"GET", "/ideas/feed"}} {
+		if rec := a.do(req[0], req[1], url.Values{"text": {"x"}}); rec.Code != http.StatusNotFound {
+			t.Errorf("demo %s %s: %d, want 404", req[0], req[1], rec.Code)
+		}
+	}
+	if open, _, _ := a.store.Ideas(context.Background()); len(open) != 0 {
+		t.Errorf("nothing should have been added: %+v", open)
+	}
+}

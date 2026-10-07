@@ -64,8 +64,23 @@ func (s *Server) deleteIdea(w http.ResponseWriter, r *http.Request) error {
 	return redirect(w, r, "/ideas")
 }
 
+// notInDemo makes a page "not found" in the demo, where there are no App
+// ideas (they'd be visitors' ideas, and could be mistaken for real ones).
+func (s *Server) notInDemo(h handlerFunc) handlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		if s.Demo {
+			return db.ErrNotFound
+		}
+		return h(w, r)
+	}
+}
+
 // ideasFeed is the open ideas as plain text, for Claude: public, no login.
 func (s *Server) ideasFeed(w http.ResponseWriter, r *http.Request) {
+	if s.Demo {
+		http.NotFound(w, r)
+		return
+	}
 	open, _, err := s.Store.Ideas(r.Context())
 	if err != nil {
 		s.publicError(w, err)

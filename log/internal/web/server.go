@@ -100,10 +100,10 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("POST /pieces/{id}/photos/{pid}/delete", s.handle(s.deletePhoto))
 	private.HandleFunc("GET /photos/{name}", s.photoFile)
 	private.Handle("GET /backups", s.handle(s.backups))
-	private.Handle("GET /ideas", s.handle(s.ideas))
-	private.Handle("POST /ideas", s.handle(s.addIdea))
-	private.Handle("POST /ideas/{id}", s.handle(s.updateIdea))
-	private.Handle("POST /ideas/{id}/delete", s.handle(s.deleteIdea))
+	private.Handle("GET /ideas", s.handle(s.notInDemo(s.ideas)))
+	private.Handle("POST /ideas", s.handle(s.notInDemo(s.addIdea)))
+	private.Handle("POST /ideas/{id}", s.handle(s.notInDemo(s.updateIdea)))
+	private.Handle("POST /ideas/{id}/delete", s.handle(s.notInDemo(s.deleteIdea)))
 	private.Handle("GET /new", s.handle(s.newForm))
 	private.Handle("POST /new", s.handle(s.create))
 
@@ -369,6 +369,8 @@ type Page struct {
 	Banners  []banner
 	// LogOutEverywhere shows the menu item.
 	LogOutEverywhere bool
+	// AppIdeas shows the App ideas menu item (not in the demo).
+	AppIdeas bool
 }
 
 // banner is a thin notice across the top of every page. Warnings are red.
@@ -379,7 +381,7 @@ type banner struct {
 
 func (s *Server) page(r *http.Request, title string) Page {
 	p := Page{Title: title, Version: s.Version, LoggedIn: s.Auth.valid(r), Today: model.Today(s.Now()),
-		LogOutEverywhere: s.canLogOutEverywhere()}
+		LogOutEverywhere: s.canLogOutEverywhere(), AppIdeas: !s.Demo}
 	if s.Demo {
 		p.Banners = append(p.Banners, banner{Text: "demo site: data is reset every hour"})
 		return p
