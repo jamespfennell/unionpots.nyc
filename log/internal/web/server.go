@@ -101,7 +101,9 @@ func (s *Server) Handler() http.Handler {
 	private.HandleFunc("GET /photos/{name}", s.photoFile)
 	private.Handle("GET /backups", s.handle(s.backups))
 	private.Handle("GET /ideas", s.handle(s.ideas))
-	private.Handle("POST /ideas", s.handle(s.saveIdeas))
+	private.Handle("POST /ideas", s.handle(s.addIdea))
+	private.Handle("POST /ideas/{id}", s.handle(s.updateIdea))
+	private.Handle("POST /ideas/{id}/delete", s.handle(s.deleteIdea))
 	private.Handle("GET /new", s.handle(s.newForm))
 	private.Handle("POST /new", s.handle(s.create))
 
@@ -109,6 +111,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", cacheStatic(http.StripPrefix("/static/", http.FileServerFS(static))))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	// The App ideas feed: public, for Claude (see log/CLAUDE.md).
+	mux.HandleFunc("GET /ideas/feed", s.ideasFeed)
 	// Public pages: no login.
 	mux.HandleFunc("GET /p/{id}", s.publicPage)
 	mux.HandleFunc("/p/", func(w http.ResponseWriter, r *http.Request) { s.publicNotFound(w, db.ErrNotFound) })

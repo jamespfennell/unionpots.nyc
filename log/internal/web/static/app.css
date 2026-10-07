@@ -366,8 +366,16 @@ details.disclosure.inline { margin-top: 0; }
 .photo-add:focus-within { outline: 2px solid var(--ink); outline-offset: 2px; }
 .photo-add.busy { opacity: 0.6; pointer-events: none; }
 
-/* Ideas: one big box. */
-.ideas textarea { width: 100%; min-height: 60vh; }
+/* App ideas: a list; each idea is edited in place. */
+.idea-new { margin-bottom: 1.5rem; }
+.ideas { list-style: none; padding: 0; margin: 0; }
+.ideas li { padding: 0.75rem 0; border-top: 1px solid var(--line); }
+.ideas textarea { width: 100%; min-height: 0; field-sizing: content; }
+.idea-actions { display: flex; justify-content: flex-end; align-items: baseline; gap: 0.75rem; margin-top: 0.25rem; }
+.idea-actions form { margin: 0; }
+.ideas-done { padding-left: 1.25rem; margin: 0.5rem 0 0; }
+.ideas-done li { margin: 0.35rem 0; }
+.idea-feed code { word-break: break-all; font-size: 0.8rem; }
 
 /* In progress: which studio's pieces to show. A labelled segmented bar
    (flush segments, outer corners rounded), like the ratings. */
@@ -382,3 +390,13 @@ details.disclosure.inline { margin-top: 0; }
 .segmented a:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .segmented a:hover { background: var(--hover); }
 .segmented a[aria-current] { position: relative; background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+/* A checkbox with its label (not stretched like other inputs). */
+.check { display: inline-flex; align-items: center; gap: 0.4rem; align-self: flex-start; font-size: 0.875rem; color: var(--muted); cursor: pointer; }
+.check input { width: auto; min-height: 0; margin: 0; padding: 0; }
+/* Each idea: the text across, then Simple on the left and Delete on the
+   right of one line (the edit form's parts join the item's grid). */
+.ideas li { display: grid; grid-template-columns: 1fr auto; align-items: center; row-gap: 0.4rem; }
+.ideas li > form[data-autosave] { display: contents; }
+.ideas li textarea { grid-column: 1 / -1; }
+.ideas li .idea-actions { margin: 0; }
+.ideas li form { margin: 0; }

@@ -386,8 +386,14 @@ project is. In progress has a filter (All · each studio) once there are two
 studios; the choice is remembered in a cookie, so arriving at a studio and
 picking it once keeps Home showing just that studio's pieces.
 
-**App ideas** (menu, under Backups): one free-text page, saved as you type, for
-ideas about improving the log as they come up (migration 007, `app_text`).
+**App ideas** (menu, under Backups): a list of ideas for improving the log
+(migration 009 turned the earlier free text into items). Each idea has a
+random hidden hash and may be ticked "simple". Claude reads the open ideas
+from a public read-only feed (`/ideas/feed`; ideas aren't private): simple
+ones it implements straight away, one commit each on main ("Implement idea:
+…"), the others one at a time with the user. Each implemented idea's hash
+goes in `internal/ideas/done.txt`; on startup the app marks those done and
+the page moves them under "Done". The workflow is in `log/CLAUDE.md`.
 
 **Demo mode** (`serve -demo`): the password `potter` is shown on the login
 page; the log resets to sample pieces (one in every state, dated relative to

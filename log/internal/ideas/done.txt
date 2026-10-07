@@ -1,0 +1,3 @@
+# App ideas that have been implemented, one per line:
+#   <hash>  <what was done>
+# The app marks these done on startup. See log/CLAUDE.md.

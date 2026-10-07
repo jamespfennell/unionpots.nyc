@@ -1100,18 +1100,62 @@ func TestPublicPage(t *testing.T) {
 func TestIdeas(t *testing.T) {
 	a := newApp(t)
 	a.login()
+	ctx := context.Background()
 	if !strings.Contains(a.do("GET", "/", nil).Body.String(), `<a href="/ideas">App ideas</a>`) {
-		t.Errorf("menu should link to Ideas")
+		t.Errorf("menu should link to App ideas")
 	}
-	if rec := a.do("POST", "/ideas", url.Values{"text": {"- a search page\n- export"}}); rec.Code != http.StatusSeeOther {
-		t.Fatalf("save: %d", rec.Code)
+	a.do("POST", "/ideas", url.Values{"text": {"a search page"}})
+	a.do("POST", "/ideas", url.Values{"text": {"export to zip"}, "simple": {"1"}})
+	if rec := a.do("POST", "/ideas", url.Values{"text": {"  "}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("empty idea: %d", rec.Code)
 	}
-	if body := a.do("GET", "/ideas", nil).Body.String(); !strings.Contains(body, "- a search page\n- export</textarea>") {
-		t.Errorf("ideas should be shown back")
+	open, _, _ := a.store.Ideas(ctx)
+	if len(open) != 2 {
+		t.Fatalf("ideas = %+v", open)
+	}
+	if !open[1].Simple || open[0].Simple {
+		t.Errorf("the simple checkbox should be saved: %+v", open)
+	}
+	a.do("POST", fmt.Sprintf("/ideas/%d", open[1].ID), url.Values{"text": {"export everything to a zip"}, "simple": {"1"}})
+	page := a.do("GET", "/ideas", nil).Body.String()
+	if !strings.Contains(page, "a search page</textarea>") || !strings.Contains(page, "export everything to a zip</textarea>") {
+		t.Errorf("open ideas should be listed")
+	}
+	if strings.Contains(page, open[0].Hash) {
+		t.Errorf("hashes are never shown in the app")
+	}
+
+	// Implemented: marked done (as on startup), then hidden under Done.
+	a.store.MarkIdeasDone(ctx, []string{open[0].Hash})
+	page = a.do("GET", "/ideas", nil).Body.String()
+	if strings.Contains(page, "a search page</textarea>") || !strings.Contains(page, "Done (1)") {
+		t.Errorf("done ideas move under Done")
+	}
+
+	// The feed: public, open ideas with their hashes.
+	if !strings.Contains(page, "/ideas/feed</code>") {
+		t.Errorf("the page should show the feed link")
 	}
 	a.cookie = nil
+	rec := a.do("GET", "/ideas/feed", nil)
+	feed := rec.Body.String()
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") ||
+		!strings.Contains(feed, open[1].Hash) || !strings.Contains(feed, "export everything to a zip") {
+		t.Fatalf("feed: %d %q", rec.Code, feed)
+	}
+	if i, j := strings.Index(feed, "# Simple ideas (1)"), strings.Index(feed, open[1].Hash); i < 0 || j < i {
+		t.Errorf("the simple idea should be listed under Simple ideas:\n%s", feed)
+	}
+	if strings.Contains(feed, open[0].Hash) {
+		t.Errorf("done ideas aren't in the feed")
+	}
 	if rec := a.do("GET", "/ideas", nil); rec.Code != http.StatusSeeOther {
-		t.Errorf("ideas are private: %d", rec.Code)
+		t.Errorf("the page itself needs a login: %d", rec.Code)
+	}
+	a.login()
+	a.do("POST", fmt.Sprintf("/ideas/%d/delete", open[1].ID), nil)
+	if open, _, _ := a.store.Ideas(ctx); len(open) != 0 {
+		t.Errorf("deleted: %+v", open)
 	}
 }
 

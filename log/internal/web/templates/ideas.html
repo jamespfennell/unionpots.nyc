@@ -1,10 +1,51 @@
 {{define "content"}}
-<h1>App ideas <span class="save-status" data-save-status aria-live="polite"></span></h1>
-<p class="muted">Ideas for improving the log, as they come up. Saved as you type.</p>
-<form method="post" action="/ideas" class="ideas" data-autosave
-      hx-post="/ideas" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
-  <input type="hidden" name="autosave" value="1">
-  <textarea autocomplete="off" name="text" rows="18" aria-label="App ideas">{{.Text}}</textarea>
-  <noscript><button class="button" type="submit">Save</button></noscript>
+<h1>App ideas</h1>
+<p class="muted">Ideas for improving the log, as they come up.</p>
+
+<form method="post" action="/ideas" class="stack idea-new">
+  <textarea autocomplete="off" name="text" rows="2" placeholder="A new idea…" aria-label="New idea" required></textarea>
+  <label class="check"><input type="checkbox" name="simple" value="1"> Simple: Claude can just do it</label>
+  <button class="button" type="submit">Add</button>
 </form>
+
+{{if .Open}}
+<ol class="ideas">
+  {{range .Open}}
+  <li>
+    <form method="post" action="/ideas/{{.ID}}" data-autosave
+          hx-post="/ideas/{{.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+      <input type="hidden" name="autosave" value="1">
+      <textarea autocomplete="off" name="text" rows="2" aria-label="Idea">{{.Text}}</textarea>
+      <label class="check"><input type="checkbox" name="simple" value="1"{{if .Simple}} checked{{end}}> Simple</label>
+    </form>
+    <span class="idea-actions">
+      <span class="save-status" data-save-status aria-live="polite"></span>
+      <form method="post" action="/ideas/{{.ID}}/delete" hx-confirm="Delete this idea?">
+        <button class="link-button danger" type="submit">Delete</button>
+      </form>
+    </span>
+  </li>
+  {{end}}
+</ol>
+{{else}}
+<p class="empty">No open ideas.</p>
+{{end}}
+
+{{with .Done}}
+<details class="disclosure">
+  <summary>Done ({{len .}})</summary>
+  <ul class="ideas-done">
+    {{range .}}<li>{{.Text}} <span class="muted">· done {{slice .DoneAt 0 10}}</span></li>{{end}}
+  </ul>
+</details>
+{{end}}
+
+<details class="disclosure">
+  <summary>Link for Claude</summary>
+  <p class="hint">A public, read-only list of the open ideas. Ask Claude to
+    “address the log.unionpots.nyc app ideas”: it implements the simple ones
+    straight away (one commit each) and goes through the others with you, one
+    at a time.</p>
+  <p class="idea-feed"><code>{{.FeedURL}}</code></p>
+</details>
 {{end}}

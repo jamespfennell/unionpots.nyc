@@ -29,6 +29,7 @@ import (
 	"unionpots.nyc/log/internal/backup"
 	"unionpots.nyc/log/internal/db"
 	"unionpots.nyc/log/internal/demo"
+	"unionpots.nyc/log/internal/ideas"
 	"unionpots.nyc/log/internal/photos"
 	"unionpots.nyc/log/internal/web"
 )
@@ -204,6 +205,12 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 	}
 
 	pieces := &db.Store{DB: sqlDB}
+	// App ideas implemented in this build (internal/ideas/done.txt).
+	if n, err := pieces.MarkIdeasDone(ctx, ideas.Done()); err != nil {
+		return fmt.Errorf("marking app ideas done: %w", err)
+	} else if n > 0 {
+		logger.Info("marked app ideas done", "count", n)
+	}
 	files := &photos.Store{Dir: o.photoDir()}
 	backupCtx, stopBackups := context.WithCancel(context.Background())
 	defer stopBackups()
