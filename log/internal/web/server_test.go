@@ -1253,3 +1253,12 @@ func TestStudios(t *testing.T) {
 		t.Errorf("rename: %q", p.StudioName)
 	}
 }
+
+func TestHomeHeadingsHaveNoCounts(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}})
+	if body := a.do("GET", "/", nil).Body.String(); !strings.Contains(body, "<h2>Waiting to be trimmed</h2>") {
+		t.Errorf("section headings should be just the state")
+	}
+}
