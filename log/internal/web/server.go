@@ -632,7 +632,9 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 			}
 			pieces = here
 		}
-		sections = append(sections, stateSection{st, pieces})
+		if len(pieces) > 0 { // empty stages aren't shown at all
+			sections = append(sections, stateSection{st, pieces})
+		}
 	}
 	data := struct {
 		Page

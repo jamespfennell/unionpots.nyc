@@ -725,7 +725,7 @@ func TestStartedFlow(t *testing.T) {
 		t.Fatalf("a started piece has no thrown size yet: %+v", m)
 	}
 	home := a.do("GET", "/", nil).Body.String()
-	if strings.Index(home, "<h2>Started") < 0 || strings.Index(home, "<h2>Started") > strings.Index(home, "<h2>Waiting to be trimmed") {
+	if i := strings.Index(home, "<h2>Started"); i < 0 || i != strings.Index(home, "<h2>") {
 		t.Fatalf("Started should be the first home section")
 	}
 
@@ -1260,5 +1260,23 @@ func TestHomeHeadingsHaveNoCounts(t *testing.T) {
 	a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}})
 	if body := a.do("GET", "/", nil).Body.String(); !strings.Contains(body, "<h2>Waiting to be trimmed</h2>") {
 		t.Errorf("section headings should be just the state")
+	}
+}
+
+func TestHomeOmitsEmptySections(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	if body := a.do("GET", "/", nil).Body.String(); !strings.Contains(body, "Nothing in progress.") || strings.Contains(body, "<h2>") {
+		t.Errorf("an empty log shows just a short note")
+	}
+	a.do("POST", "/new", url.Values{"action": {"thrown"}})
+	body := a.do("GET", "/", nil).Body.String()
+	if !strings.Contains(body, "<h2>Waiting to be trimmed</h2>") {
+		t.Errorf("a stage with pieces is shown")
+	}
+	for _, empty := range []string{"<h2>Started</h2>", "<h2>Drying</h2>", "<h2>Waiting to be glaze fired</h2>", "Nothing in progress."} {
+		if strings.Contains(body, empty) {
+			t.Errorf("%q shouldn't be on the page", empty)
+		}
 	}
 }

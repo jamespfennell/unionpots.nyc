@@ -12,13 +12,11 @@
 {{range .Sections}}
 <section class="group">
   <h2>{{.State.Label}}</h2>
-  {{if .Pieces}}
   <div class="rows">
     {{range .Pieces}}{{template "pieceRow" (dict "Piece" . "Today" $.Today)}}{{end}}
   </div>
-  {{else}}
-  <p class="empty">Nothing here.</p>
-  {{end}}
 </section>
+{{else}}
+<p class="empty">Nothing in progress.</p>
 {{end}}
 {{end}}
