@@ -6,3 +6,4 @@ efbe734152b98ccc28ab5cdbc96fa648  in progress section headings no longer show th
 267672dd3d3ad86997784da0e6078951  in progress leaves out empty sections, heading and all
 ebfaf112e0f6e41ce82e69058e2189b0  clay bodies no longer have a product code or price (columns dropped); notes cover it
 9ffecb8914d8f60b02c5652530450ed9  clay pills choose one clay; "+ another clay" allows several (pieces with several start that way)
+b1d6b06a8fd26708b7ddcf9816c88e8d  finished pieces show by project by default ("#127 +4", linking to the project), with a by-piece view

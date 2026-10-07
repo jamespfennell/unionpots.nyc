@@ -1303,3 +1303,100 @@ func TestClayPillsOneByDefault(t *testing.T) {
 		t.Errorf("several clays: %+v", cs)
 	}
 }
+
+func TestFinishedByProject(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	mk := func(np db.NewPieces) []int64 {
+		ids, err := a.store.CreatePieces(ctx, np)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	set := mk(db.NewPieces{Count: 3, Name: "Tiny planters", Action: model.Thrown, Date: "2026-07-01"}) // #120–#122
+	a.store.AddEvents(ctx, set[:2], model.Finished, "2026-08-10", db.StepDetails{})
+	a.store.AddEvents(ctx, set[2:], model.Finished, "2026-08-20", db.StepDetails{})
+	single := mk(db.NewPieces{Count: 1, Name: "Planter", Action: model.Thrown, Date: "2026-06-01"}) // #123
+	a.store.AddEvents(ctx, single, model.Finished, "2026-06-25", db.StepDetails{})
+	unnamed := mk(db.NewPieces{Count: 2, Action: model.Thrown, Date: "2026-05-01", Form: "bowl"}) // #124–#125
+	a.store.AddEvents(ctx, unnamed[:1], model.Finished, "2026-05-20", db.StepDetails{})           // #125 not finished
+
+	body := a.do("GET", "/finished", nil).Body.String()
+	for _, want := range []string{
+		`aria-current="true">By project</a>`,
+		`href="/projects/`, `#120 <span class="more">+2</span>`, `Tiny planters`, `Aug 20`,
+		`href="/pieces/123"`, `#123</span>`,
+		`#124</span>`, `<span class="name">bowl</span>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("by project: missing %q", want)
+		}
+	}
+	if strings.Contains(body, "#121") || strings.Contains(body, "+1") {
+		t.Errorf("a set is one line; the unfinished #125 isn't counted")
+	}
+	if strings.Count(body, `class="row row-project"`) != 3 {
+		t.Errorf("want 3 project lines")
+	}
+	// Summer 2026 holds the set (dated by its last piece, Aug 20) and the planter.
+	if i, j := strings.Index(body, "Tiny planters"), strings.Index(body, ">Planter<"); i < 0 || j < i {
+		t.Errorf("most recently finished first")
+	}
+
+	pieces := a.do("GET", "/finished?view=pieces", nil).Body.String()
+	if !strings.Contains(pieces, `aria-current="true">By piece</a>`) || strings.Count(pieces, `href="/pieces/`) != 5 {
+		t.Errorf("by piece lists every finished piece")
+	}
+}
+
+func TestInProgressByProject(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	ids, _ := a.store.CreatePieces(ctx, db.NewPieces{Count: 3, Name: "Mugs", Action: model.Thrown, Date: "2026-09-20"}) // #120–#122
+	a.store.AddEvents(ctx, ids[1:2], model.Trimmed, "2026-09-28", db.StepDetails{})                                     // #121 moves on alone
+	a.store.DB.Exec("UPDATE events SET occurred_on = '2026-09-25' WHERE piece_id = 122 AND action = 'thrown'")
+	if body := a.do("GET", "/", nil).Body.String(); !strings.Contains(body, `aria-current="true">By piece</a>`) ||
+		strings.Contains(body, "row-project") || !strings.Contains(body, `href="/pieces/120"`) {
+		t.Errorf("In progress lists pieces by default")
+	}
+	body := a.do("GET", "/?view=projects", nil).Body.String()
+	trim := body[strings.Index(body, "<h2>Waiting to be trimmed</h2>"):]
+	if i := strings.Index(trim, "<h2>"); i > 0 {
+		trim = trim[:i]
+	}
+	if !strings.Contains(trim, `#120 <span class="more">+1</span>`) || !strings.Contains(trim, `href="/projects/`) || !strings.Contains(trim, "13 days ago") {
+		t.Errorf("waiting to be trimmed: one line for #120 and #122, dated by the longest waiting:\n%s", trim)
+	}
+	dry := body[strings.Index(body, "<h2>Drying</h2>"):]
+	if !strings.Contains(dry, `href="/pieces/121"`) || !strings.Contains(dry, "Mugs (2/3)") {
+		t.Errorf("drying: #121 on its own, as a piece:\n%s", dry[:min(600, len(dry))])
+	}
+}
+
+func TestStudioAndViewTogether(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	cw, _ := a.store.EnsureStudio(ctx, "Clayworks")
+	ph, _ := a.store.EnsureStudio(ctx, "Powerhouse")
+	a.store.CreatePieces(ctx, db.NewPieces{Count: 2, Name: "Bowls", Action: model.Thrown, Date: "2026-10-01", StudioID: cw})
+	a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Name: "Mug", Action: model.Thrown, Date: "2026-10-01", StudioID: ph})
+
+	// By project, then the Clayworks link from that page: both stick.
+	page := a.do("GET", "/?view=projects", nil).Body.String()
+	link := fmt.Sprintf(`href="/?studio=%d&view=projects"`, cw)
+	if !strings.Contains(page, link) {
+		t.Fatalf("the studio links should keep the view: want %s", link)
+	}
+	rec := a.do("GET", fmt.Sprintf("/?studio=%d&view=projects", cw), nil)
+	body := rec.Body.String()
+	if !strings.Contains(body, `aria-current="true">Clayworks</a>`) || !strings.Contains(body, `aria-current="true">By project</a>`) {
+		t.Errorf("Clayworks and By project should both be selected")
+	}
+	if !strings.Contains(body, `#120 <span class="more">+1</span>`) || strings.Contains(body, "#122") {
+		t.Errorf("Clayworks' pieces, by project")
+	}
+}

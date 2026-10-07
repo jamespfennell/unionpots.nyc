@@ -176,3 +176,15 @@
   {{end}}
 </fieldset>
 {{end}}
+
+{{/* A project's pieces in a list as one line: "#127 +4  Tiny planters  …".
+     Args: Line (projectLine), Today, Dated (the date, "mid Aug", instead of
+     "3 days ago"). */}}
+{{define "projectRow"}}
+{{with .Line}}
+<a class="row row-project" href="{{.Href}}">
+  <span class="pid">#{{.First}}{{if .More}} <span class="more">+{{.More}}</span>{{end}}</span>
+  <span class="row-main">{{with .Name}}<span class="name">{{.}}</span>{{end}}<span class="ago"{{if .DateApprox}} title="Approximate date"{{end}}>{{if $.Dated}}{{stepDate .Date .DateApprox false}}{{else}}{{if .DateApprox}}~{{end}}{{daysAgo .Date $.Today}}{{end}}</span></span>
+</a>
+{{end}}
+{{end}}

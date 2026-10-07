@@ -1,19 +1,32 @@
 {{define "content"}}
 {{with .Notice}}<p class="notice" role="status">{{.}}</p>{{end}}
 <p class="home-new"><a class="button block" href="/new">+ New project</a></p>
-{{with .Studios}}
-<nav class="studio-filter" aria-labelledby="studio-filter-label">
-  <span id="studio-filter-label" class="studio-filter-label">Studio</span>
-  <span class="segmented">
-    <a href="/?studio=all"{{if eq $.Studio 0}} aria-current="true"{{end}}>All</a>{{range .}}<a href="/?studio={{.ID}}"{{if eq $.Studio .ID}} aria-current="true"{{end}}>{{.Name}}</a>{{end}}
-  </span>
-</nav>
-{{end}}
+<div class="filters">
+  {{with .Studios}}
+  <nav class="studio-filter" aria-labelledby="studio-filter-label">
+    <span id="studio-filter-label" class="studio-filter-label">Studio</span>
+    <span class="segmented">
+      {{/* "&view=projects" is literal text: a value put into a link would be escaped (&→%26). */}}
+      <a href="/?studio=all{{if $.ByProject}}&view=projects{{end}}"{{if eq $.Studio 0}} aria-current="true"{{end}}>All</a>{{range .}}<a href="/?studio={{.ID}}{{if $.ByProject}}&view=projects{{end}}"{{if eq $.Studio .ID}} aria-current="true"{{end}}>{{.Name}}</a>{{end}}
+    </span>
+  </nav>
+  {{end}}
+  <nav class="studio-filter" aria-labelledby="home-view-label">
+    <span id="home-view-label" class="studio-filter-label">Show</span>
+    <span class="segmented">
+      <a href="/"{{if not .ByProject}} aria-current="true"{{end}}>By piece</a><a href="/?view=projects"{{if .ByProject}} aria-current="true"{{end}}>By project</a>
+    </span>
+  </nav>
+</div>
 {{range .Sections}}
 <section class="group">
   <h2>{{.State.Label}}</h2>
   <div class="rows">
+    {{if $.ByProject}}
+    {{range .Lines}}{{template "projectRow" (dict "Line" . "Today" $.Today)}}{{end}}
+    {{else}}
     {{range .Pieces}}{{template "pieceRow" (dict "Piece" . "Today" $.Today)}}{{end}}
+    {{end}}
   </div>
 </section>
 {{else}}

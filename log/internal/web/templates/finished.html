@@ -1,10 +1,20 @@
 {{define "content"}}
 <h1>Finished pieces</h1>
+<nav class="studio-filter" aria-labelledby="finished-view-label">
+  <span id="finished-view-label" class="studio-filter-label">Show</span>
+  <span class="segmented">
+    <a href="/finished"{{if not .ByPiece}} aria-current="true"{{end}}>By project</a><a href="/finished?view=pieces"{{if .ByPiece}} aria-current="true"{{end}}>By piece</a>
+  </span>
+</nav>
 {{range .Seasons}}
 <section class="group">
   <h2>{{.Season}}</h2>
   <div class="rows">
+    {{if $.ByPiece}}
     {{range .Pieces}}{{template "pieceRow" (dict "Piece" . "Today" $.Today "Dated" true)}}{{end}}
+    {{else}}
+    {{range .Projects}}{{template "projectRow" (dict "Line" . "Today" $.Today "Dated" true)}}{{end}}
+    {{end}}
   </div>
 </section>
 {{else}}

@@ -142,6 +142,9 @@ h1 + .group { border-top: 0; }
   text-decoration: none;
 }
 .row:hover { background: var(--hover); }
+/* Pieces grouped by project: "#127 +4" needs a wider number column. */
+.row-project { grid-template-columns: 4.5rem 1fr auto; }
+.row-project .more { font-weight: 400; } /* black like the number, not bold */
 .row-two { grid-template-columns: 1fr auto; }
 .pid { font-weight: 600; }
 /* A long name is cut short ("…"), never the date after it. */
@@ -382,6 +385,8 @@ details.disclosure.inline { margin-top: 0; }
 /* In progress: which studio's pieces to show. A labelled segmented bar
    (flush segments, outer corners rounded), like the ratings. */
 .studio-filter { margin: 0 0 1.5rem; }
+/* In progress: Studio and Show side by side when they fit. */
+.filters { display: flex; flex-wrap: wrap; column-gap: 1.5rem; }
 .studio-filter-label { display: block; margin-bottom: 0.5rem; font-size: 0.875rem; color: var(--muted); }
 .segmented { display: inline-flex; max-width: 100%; overflow-x: auto; }
 .segmented a {

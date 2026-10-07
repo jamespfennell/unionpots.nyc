@@ -608,6 +608,7 @@ func (s *Server) canLogOutEverywhere() bool { return s.Auth.Rotate != nil && !s.
 type stateSection struct {
 	State  model.State
 	Pieces []db.Piece
+	Lines  []projectLine // the same pieces, one line per project
 }
 
 // home lists all in-progress work, one section per state.
@@ -617,6 +618,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	studio := s.studioFilter(w, r, studios)
+	byProject := r.URL.Query().Get("view") == "projects"
 	var sections []stateSection
 	for _, st := range model.InProgress {
 		pieces, err := s.Store.PiecesInState(r.Context(), st)
@@ -632,17 +634,25 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 			}
 			pieces = here
 		}
-		if len(pieces) > 0 { // empty stages aren't shown at all
-			sections = append(sections, stateSection{st, pieces})
+		if len(pieces) == 0 {
+			continue // empty stages aren't shown at all
 		}
+		sec := stateSection{State: st, Pieces: pieces}
+		if byProject {
+			if sec.Lines, err = s.projectLines(r, pieces, false); err != nil {
+				return err
+			}
+		}
+		sections = append(sections, sec)
 	}
 	data := struct {
 		Page
-		Sections []stateSection
-		Notice   string // what just happened, after creating pieces or recording a step
-		Studios  []db.Studio
-		Studio   int64 // the studio shown; 0 = all
-	}{s.page(r, "Log"), sections, "", studios, studio}
+		Sections  []stateSection
+		Notice    string // what just happened, after creating pieces or recording a step
+		Studios   []db.Studio
+		Studio    int64 // the studio shown; 0 = all
+		ByProject bool  // one line per project ("?view=projects"); by piece by default
+	}{s.page(r, "Log"), sections, "", studios, studio, byProject}
 	if len(studios) < 2 {
 		data.Studios = nil // nothing to filter by
 	}
@@ -655,10 +665,24 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 	return s.render(w, http.StatusOK, "home", data)
 }
 
-// seasonGroup is one season's pieces on the finished pieces page.
+// seasonGroup is one season's pieces (or projects) on the finished pieces
+// page.
 type seasonGroup struct {
-	Season string
-	Pieces []db.Piece
+	Season   string
+	Pieces   []db.Piece
+	Projects []projectLine
+}
+
+// projectLine is one line in a list of pieces grouped by project: the
+// project's pieces in the list, shown as its lowest number and how many more
+// ("#127 +4"). A line of one piece is just that piece.
+type projectLine struct {
+	First      int64
+	More       int
+	Name       string // the project's name (or the pieces' form); a single piece's label
+	Href       string // the project page; for a single piece, the piece
+	Date       string
+	DateApprox bool
 }
 
 // season names the season a date falls in: "Spring 2025" (March–May),
@@ -684,8 +708,10 @@ func season(date string) string {
 }
 
 // finished lists every finished piece, most recently finished first,
-// grouped by season.
+// grouped by season: by default one line per project; "?view=pieces" one
+// line per piece.
 func (s *Server) finished(w http.ResponseWriter, r *http.Request) error {
+	byPiece := r.URL.Query().Get("view") == "pieces"
 	pieces, err := s.Store.PiecesInState(r.Context(), model.StateFinished)
 	if err != nil {
 		return err
@@ -697,18 +723,78 @@ func (s *Server) finished(w http.ResponseWriter, r *http.Request) error {
 		return pieces[i].ID > pieces[j].ID
 	})
 	var seasons []seasonGroup
-	for _, p := range pieces {
-		name := season(p.StateDate)
+	group := func(date string) *seasonGroup {
+		name := season(date)
 		if len(seasons) == 0 || seasons[len(seasons)-1].Season != name {
 			seasons = append(seasons, seasonGroup{Season: name})
 		}
-		seasons[len(seasons)-1].Pieces = append(seasons[len(seasons)-1].Pieces, p)
+		return &seasons[len(seasons)-1]
+	}
+	if byPiece {
+		for _, p := range pieces {
+			g := group(p.StateDate)
+			g.Pieces = append(g.Pieces, p)
+		}
+	} else {
+		projects, err := s.projectLines(r, pieces, true)
+		if err != nil {
+			return err
+		}
+		for _, fp := range projects {
+			g := group(fp.Date)
+			g.Projects = append(g.Projects, fp)
+		}
 	}
 	data := struct {
 		Page
 		Seasons []seasonGroup
-	}{s.page(r, "Finished pieces"), seasons}
+		ByPiece bool
+	}{s.page(r, "Finished pieces"), seasons, byPiece}
 	return s.render(w, http.StatusOK, "finished", data)
+}
+
+// projectLines groups pieces by project, one line per project, in the order
+// each project first appears. A line's date is its pieces' latest state date
+// if latest, else the earliest (how long the first has been waiting).
+func (s *Server) projectLines(r *http.Request, pieces []db.Piece, latest bool) ([]projectLine, error) {
+	var out []projectLine
+	var first []db.Piece  // the first piece of each line, for single-piece lines
+	at := map[int64]int{} // project id → index in out
+	for _, p := range pieces {
+		if i, ok := at[p.ProjectID]; ok {
+			l := &out[i]
+			l.More++
+			l.First = min(l.First, p.ID)
+			if later := p.StateDate > l.Date; later == latest && p.StateDate != l.Date {
+				l.Date, l.DateApprox = p.StateDate, p.StateDateApprox
+			}
+			continue
+		}
+		at[p.ProjectID] = len(out)
+		out = append(out, projectLine{First: p.ID, Date: p.StateDate, DateApprox: p.StateDateApprox})
+		first = append(first, p)
+	}
+	for i := range out {
+		l, p := &out[i], first[i]
+		if l.More == 0 {
+			l.Href = pieceURL(p.ID)
+		} else {
+			l.Href = fmt.Sprintf("/projects/%d", p.ProjectID)
+		}
+		switch {
+		case p.ProjectName == "": // no name: the form says what it is ("bowl")
+			d, err := s.Store.GetDetails(r.Context(), p.ID)
+			if err != nil {
+				return nil, err
+			}
+			l.Name = d.Form
+		case l.More == 0:
+			l.Name = p.Label() // a single piece of a set: "Set of 4 mugs (2/4)"
+		default:
+			l.Name = p.ProjectName
+		}
+	}
+	return out, nil
 }
 
 // sameState returns the other pieces in p's project that are in p's state:
