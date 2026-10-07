@@ -9,8 +9,6 @@
         hx-post="/clays/{{$c.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
     <input type="hidden" name="autosave" value="1">
     <label class="field">Name <input name="title" value="{{$c.Name}}" required autocomplete="off"></label>
-    <label class="field">Product code <input name="code" value="{{$c.Code}}" autocomplete="off" placeholder="e.g. serial or product number"></label>
-    <label class="field">Price <input name="price" value="{{$c.Price}}" autocomplete="off" placeholder="e.g. $38 / 25 lb"></label>
     <label class="field">Notes <textarea autocomplete="off" name="notes" rows="4" placeholder="supplier, cone, colour…">{{$c.Notes}}</textarea></label>
   </form>
 </section>

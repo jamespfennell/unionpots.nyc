@@ -52,8 +52,8 @@ func seed(ctx context.Context, s *db.Store, files *photos.Store, now time.Time) 
 
 	clays := map[string]int64{}
 	for _, c := range []db.Clay{
-		{Name: "Speckled Buff", Code: "SB-5", Price: "$32 / 50 lb", Notes: "Cone 6 stoneware with iron speckles."},
-		{Name: "B-Mix", Code: "BM-5", Price: "$30 / 50 lb", Notes: "Smooth, throws well."},
+		{Name: "Speckled Buff", Notes: "Cone 6 stoneware with iron speckles. SB-5, $32 / 50 lb."},
+		{Name: "B-Mix", Notes: "Smooth, throws well. BM-5, $30 / 50 lb."},
 	} {
 		id, err := s.EnsureClay(ctx, c.Name)
 		if err != nil {

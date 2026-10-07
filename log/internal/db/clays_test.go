@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
@@ -54,10 +55,10 @@ func TestClays(t *testing.T) {
 	if err := s.UpdateClay(ctx, Clay{ID: white, Name: "Porcelain"}); err == nil {
 		t.Fatalf("renaming onto an existing name should fail")
 	}
-	if err := s.UpdateClay(ctx, Clay{ID: white, Name: "White SW", Code: "WC-401", Price: "$32 / 25 lb"}); err != nil {
+	if err := s.UpdateClay(ctx, Clay{ID: white, Name: "White SW", Notes: "WC-401, $32 / 25 lb"}); err != nil {
 		t.Fatal(err)
 	}
-	if c, _ := s.GetClay(ctx, white); c.Code != "WC-401" || c.Price != "$32 / 25 lb" {
+	if c, _ := s.GetClay(ctx, white); c.Name != "White SW" || c.Notes != "WC-401, $32 / 25 lb" {
 		t.Fatalf("details: %+v", c)
 	}
 
@@ -71,5 +72,31 @@ func TestClays(t *testing.T) {
 	}
 	if _, err := s.GetClay(ctx, white); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("deleted clay still there: %v", err)
+	}
+}
+
+func TestMigration10DropsClayCodeAndPrice(t *testing.T) {
+	sqlDB, err := Open(filepath.Join(t.TempDir(), "log.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	ctx := context.Background()
+	if err := migrateTo(ctx, sqlDB, 9); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlDB.Exec("INSERT INTO clays (name, code, price, notes) VALUES ('Brown', 'B-1', '$30', 'nice')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, sqlDB); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{DB: sqlDB}
+	cs, err := s.Clays(ctx)
+	if err != nil || len(cs) != 1 || cs[0].Name != "Brown" || cs[0].Notes != "nice" {
+		t.Fatalf("clays after migration: %+v %v", cs, err)
+	}
+	if _, err := sqlDB.Exec("SELECT code FROM clays"); err == nil {
+		t.Errorf("the code column should be gone")
 	}
 }

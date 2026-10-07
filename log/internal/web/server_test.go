@@ -496,8 +496,8 @@ func TestClayBodies(t *testing.T) {
 			t.Errorf("GET %s: %d", path, rec.Code)
 		}
 	}
-	a.do("POST", fmt.Sprintf("/clays/%d", porcelain), url.Values{"title": {"Porcelain"}, "code": {"P-10"}, "price": {"$40"}})
-	if c, _ := a.store.GetClay(ctx, porcelain); c.Code != "P-10" || c.Price != "$40" {
+	a.do("POST", fmt.Sprintf("/clays/%d", porcelain), url.Values{"title": {"Porcelain"}, "notes": {"P-10, $40"}})
+	if c, _ := a.store.GetClay(ctx, porcelain); c.Notes != "P-10, $40" {
 		t.Fatalf("clay details: %+v", c)
 	}
 	if rec := a.do("POST", fmt.Sprintf("/clays/%d/delete", porcelain), url.Values{}); rec.Code != http.StatusBadRequest {

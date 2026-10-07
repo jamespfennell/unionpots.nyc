@@ -6,7 +6,7 @@
   <div class="rows">
     {{range .Clays}}
     <a class="row row-two" href="/clays/{{.ID}}">
-      <span class="row-main">{{.Name}}{{with .Code}}<span class="ago">{{.}}</span>{{end}}</span>
+      <span class="row-main">{{.Name}}</span>
       <span class="row-end">{{.Pieces}} piece{{if ne .Pieces 1}}s{{end}}</span>
     </a>
     {{end}}

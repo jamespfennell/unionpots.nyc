@@ -71,7 +71,7 @@ func (s *Server) updateClay(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	c := db.Clay{ID: id, Name: r.FormValue("title"), Code: r.FormValue("code"), Price: r.FormValue("price"), Notes: r.FormValue("notes")}
+	c := db.Clay{ID: id, Name: r.FormValue("title"), Notes: r.FormValue("notes")}
 	if err := s.Store.UpdateClay(r.Context(), c); err != nil {
 		return err
 	}

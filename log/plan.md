@@ -627,7 +627,7 @@ backups running to Spaces, restore drill performed. Next: M2.
   bisque queue to finished.
 
 **M2b — Clay bodies** ✓
-- Clay bodies are records (`clays`: name, product code, price, notes) with
+- Clay bodies are records (`clays`: name, notes; product code and price were dropped in migration 010) with
   a list page (`/clays`) and an edit page (autosaved; lists the pieces made
   from it; unused ones can be deleted). Pieces link via `piece_clays`, so a
   piece can use more than one.

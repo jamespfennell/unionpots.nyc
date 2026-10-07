@@ -11,18 +11,16 @@ import (
 type Clay struct {
 	ID     int64
 	Name   string
-	Code   string // product / serial number
-	Price  string
 	Notes  string
 	Pieces int // number of pieces made from it
 }
 
-const clayColumns = `c.id, c.name, c.code, c.price, c.notes,
+const clayColumns = `c.id, c.name, c.notes,
 	(SELECT COUNT(*) FROM piece_clays pc WHERE pc.clay_id = c.id)`
 
 func scanClay(row interface{ Scan(...any) error }) (Clay, error) {
 	var c Clay
-	err := row.Scan(&c.ID, &c.Name, &c.Code, &c.Price, &c.Notes, &c.Pieces)
+	err := row.Scan(&c.ID, &c.Name, &c.Notes, &c.Pieces)
 	return c, err
 }
 
@@ -110,8 +108,8 @@ func (s *Store) UpdateClay(ctx context.Context, c Clay) error {
 		return userErr("a clay body needs a name")
 	}
 	res, err := s.DB.ExecContext(ctx,
-		"UPDATE clays SET name = ?, code = ?, price = ?, notes = ? WHERE id = ?",
-		c.Name, strings.TrimSpace(c.Code), strings.TrimSpace(c.Price), c.Notes, c.ID)
+		"UPDATE clays SET name = ?, notes = ? WHERE id = ?",
+		c.Name, c.Notes, c.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return userErr("there is already a clay body called %q", c.Name)

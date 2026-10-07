@@ -4,3 +4,4 @@
 25ba386d4328b024e1749c71d09692b0  login page shows the running version, as in the menu
 efbe734152b98ccc28ab5cdbc96fa648  in progress section headings no longer show the number of pieces
 267672dd3d3ad86997784da0e6078951  in progress leaves out empty sections, heading and all
+ebfaf112e0f6e41ce82e69058e2189b0  clay bodies no longer have a product code or price (columns dropped); notes cover it
