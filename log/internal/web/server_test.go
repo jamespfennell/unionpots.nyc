@@ -132,6 +132,14 @@ func TestPrivatePagesRequireLogin(t *testing.T) {
 	}
 }
 
+func TestLoginPageShowsVersion(t *testing.T) {
+	a := newApp(t)
+	a.srv.Version = "abc1234 · built 7 Oct 2026"
+	if !strings.Contains(a.do("GET", "/login", nil).Body.String(), `<p class="login-version">Version abc1234 · built 7 Oct 2026</p>`) {
+		t.Errorf("the login page should show the version")
+	}
+}
+
 func TestWrongPasswordAndRateLimit(t *testing.T) {
 	a := newApp(t)
 	for i := 0; i < maxFailures; i++ {

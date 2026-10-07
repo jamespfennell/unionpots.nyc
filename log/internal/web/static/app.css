@@ -344,6 +344,7 @@ details.disclosure.inline { margin-top: 0; }
 
 .login { max-width: 360px; margin: 18vh auto 0; }
 .login h1 { margin-bottom: 1.5rem; }
+.login-version { margin: 1.5rem 0 0; text-align: center; font-size: 0.8rem; color: var(--muted); }
 .login-message { background: var(--hover); border-radius: var(--radius); padding: 0.75rem 1rem; margin: 0; }
 
 /* Photos: justified rows. Each photo keeps its own shape (no cropping, no

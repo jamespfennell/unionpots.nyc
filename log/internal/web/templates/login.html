@@ -11,5 +11,6 @@
     {{with .Error}}<p class="error">{{.}}</p>{{end}}
     <button class="button primary block" type="submit">Log in</button>
   </form>
+  {{with .Version}}<p class="login-version">Version {{.}}</p>{{end}}
 </div>
 {{end}}
