@@ -6,8 +6,10 @@
   <nav class="studio-filter" aria-labelledby="studio-filter-label">
     <span id="studio-filter-label" class="studio-filter-label">Studio</span>
     <span class="segmented">
-      {{/* "&view=projects" is literal text: a value put into a link would be escaped (&→%26). */}}
-      <a href="/?studio=all{{if $.ByProject}}&view=projects{{end}}"{{if eq $.Studio 0}} aria-current="true"{{end}}>All</a>{{range .}}<a href="/?studio={{.ID}}{{if $.ByProject}}&view=projects{{end}}"{{if eq $.Studio .ID}} aria-current="true"{{end}}>{{.Name}}</a>{{end}}
+      {{/* No studio selected shows every studio. Tapping the selected studio
+           deselects it; tapping another switches to it. "&view=projects" is
+           literal text: a value put into a link would be escaped (&→%26). */}}
+      {{range .}}{{if eq $.Studio .ID}}<a href="/?studio=all{{if $.ByProject}}&view=projects{{end}}" aria-current="true">{{.Name}}</a>{{else}}<a href="/?studio={{.ID}}{{if $.ByProject}}&view=projects{{end}}">{{.Name}}</a>{{end}}{{end}}
     </span>
   </nav>
   {{end}}

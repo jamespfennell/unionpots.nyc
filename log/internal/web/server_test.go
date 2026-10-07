@@ -1400,3 +1400,28 @@ func TestStudioAndViewTogether(t *testing.T) {
 		t.Errorf("Clayworks' pieces, by project")
 	}
 }
+
+func TestStudioFilterWithoutAll(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	cw, _ := a.store.EnsureStudio(ctx, "Clayworks")
+	ph, _ := a.store.EnsureStudio(ctx, "Powerhouse")
+	a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Name: "Bowl", Action: model.Thrown, Date: "2026-10-01", StudioID: cw})
+	a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Name: "Mug", Action: model.Thrown, Date: "2026-10-01", StudioID: ph})
+
+	body := a.do("GET", "/", nil).Body.String()
+	if strings.Contains(body, ">All</a>") || strings.Contains(body, `aria-current="true">Clayworks`) {
+		t.Errorf("no All, and nothing selected by default")
+	}
+	if !strings.Contains(body, "#120") || !strings.Contains(body, "#121") {
+		t.Errorf("nothing selected shows every studio")
+	}
+	// Selected: its link deselects; the other studio's link switches.
+	rec := a.do("GET", fmt.Sprintf("/?studio=%d", cw), nil)
+	body = rec.Body.String()
+	if !strings.Contains(body, `<a href="/?studio=all" aria-current="true">Clayworks</a>`) ||
+		!strings.Contains(body, fmt.Sprintf(`<a href="/?studio=%d">Powerhouse</a>`, ph)) {
+		t.Errorf("the selected studio's link should deselect it")
+	}
+}
