@@ -714,6 +714,7 @@ func season(date string) string {
 // line per piece.
 func (s *Server) finished(w http.ResponseWriter, r *http.Request) error {
 	byPiece := r.URL.Query().Get("view") == "pieces"
+	filters := readFinishedFilters(r)
 	pieces, err := s.Store.PiecesInState(r.Context(), model.StateFinished)
 	if err != nil {
 		return err
@@ -724,6 +725,10 @@ func (s *Server) finished(w http.ResponseWriter, r *http.Request) error {
 		}
 		return pieces[i].ID > pieces[j].ID
 	})
+	pieces, options, err := s.filterFinished(r, pieces, filters)
+	if err != nil {
+		return err
+	}
 	var seasons []seasonGroup
 	group := func(date string) *seasonGroup {
 		name := season(date)
@@ -749,9 +754,18 @@ func (s *Server) finished(w http.ResponseWriter, r *http.Request) error {
 	}
 	data := struct {
 		Page
-		Seasons []seasonGroup
-		ByPiece bool
-	}{s.page(r, "Finished pieces"), seasons, byPiece}
+		Seasons     []seasonGroup
+		ByPiece     bool
+		Filters     finishedFilters
+		Options     finishedOptions
+		Count       int    // pieces shown
+		ProjectHref string // the views' links, keeping the filters
+		PieceHref   string
+	}{s.page(r, "Finished pieces"), seasons, byPiece, filters, options, len(pieces),
+		filters.href(false), filters.href(true)}
+	if len(options.Studios) < 2 {
+		data.Options.Studios = nil // nothing to choose between
+	}
 	return s.render(w, http.StatusOK, "finished", data)
 }
 

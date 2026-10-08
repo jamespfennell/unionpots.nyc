@@ -407,3 +407,9 @@ details.disclosure.inline { margin-top: 0; }
 .ideas li textarea { grid-column: 1 / -1; }
 .ideas li .idea-actions { margin: 0; }
 .ideas li form { margin: 0; }
+
+/* Finished pieces: filter dropdowns in a row that wraps. */
+.finished-filters { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; margin: 0 0 1rem; }
+.filter-field { flex: 1 1 8rem; min-width: 0; }
+.filter-field select { width: 100%; }
+.filter-result { margin: 0 0 1.25rem; font-size: 0.875rem; color: var(--muted); }

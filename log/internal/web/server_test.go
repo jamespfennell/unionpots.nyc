@@ -1442,3 +1442,66 @@ func TestNoAppIdeasInDemo(t *testing.T) {
 		t.Errorf("nothing should have been added: %+v", open)
 	}
 }
+
+func TestFinishedFilters(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	brown, _ := a.store.EnsureClay(ctx, "Brown")
+	black, _ := a.store.EnsureClay(ctx, "Black")
+	a.store.EnsureGlaze(ctx, "Floating Blue")
+	a.store.EnsureGlaze(ctx, "Silky Blue")
+	cw, _ := a.store.EnsureStudio(ctx, "Clayworks")
+	ph, _ := a.store.EnsureStudio(ctx, "Powerhouse")
+	mk := func(name, form string, clay, studio int64, glaze string) {
+		ids, err := a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Name: name, Form: form, ClayIDs: []int64{clay},
+			StudioID: studio, Action: model.Glazed, Date: "2026-09-01"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.store.SetGlazeText(ctx, ids[0], glaze)
+		a.store.AddEvents(ctx, ids, model.Finished, "2026-09-10", db.StepDetails{})
+	}
+	mk("Big bowl", "Bowls", brown, cw, "Floating Blue under Silky Blue") // #120
+	mk("Pasta bowl", "pasta bowl", black, cw, "Silky Blue")              // #121
+	mk("Mug", "mug", brown, ph, "Floating Blue")                         // #122
+
+	shows := func(q string) []string {
+		body := a.do("GET", "/finished?view=pieces&"+q, nil).Body.String()
+		var got []string
+		for _, n := range []string{"Big bowl", "Pasta bowl", "Mug"} {
+			if strings.Contains(body, n) {
+				got = append(got, n)
+			}
+		}
+		return got
+	}
+	for q, want := range map[string]string{
+		"":                             "Big bowl,Pasta bowl,Mug",
+		"clay=Brown":                   "Big bowl,Mug",
+		"glaze=Floating+Blue":          "Big bowl,Mug",
+		"glaze=silky+blue":             "Big bowl,Pasta bowl",
+		"form=bowl":                    "Big bowl,Pasta bowl",
+		"studio=Powerhouse":            "Mug",
+		"clay=Brown&glaze=Silky+Blue":  "Big bowl",
+		"clay=Black&studio=Powerhouse": "",
+	} {
+		if got := strings.Join(shows(q), ","); got != want {
+			t.Errorf("?%s: got %q, want %q", q, got, want)
+		}
+	}
+
+	body := a.do("GET", "/finished?clay=Brown", nil).Body.String()
+	for _, want := range []string{"2 pieces", "Clear filters", `<option selected>Brown</option>`,
+		`href="/finished?clay=Brown&amp;view=pieces"`, `<option>bowl</option>`, `<option>Powerhouse</option>`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("filtered page should contain %q", want)
+		}
+	}
+	if strings.Contains(a.do("GET", "/finished", nil).Body.String(), "Clear filters") {
+		t.Errorf("no Clear link without filters")
+	}
+	if !strings.Contains(a.do("GET", "/finished?clay=Black&studio=Powerhouse", nil).Body.String(), "No finished pieces match.") {
+		t.Errorf("an empty result should say so")
+	}
+}

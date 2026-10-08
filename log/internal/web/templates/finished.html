@@ -3,9 +3,22 @@
 <nav class="studio-filter" aria-labelledby="finished-view-label">
   <span id="finished-view-label" class="studio-filter-label">Show</span>
   <span class="segmented">
-    <a href="/finished"{{if not .ByPiece}} aria-current="true"{{end}}>By project</a><a href="/finished?view=pieces"{{if .ByPiece}} aria-current="true"{{end}}>By piece</a>
+    <a href="{{.ProjectHref}}"{{if not .ByPiece}} aria-current="true"{{end}}>By project</a><a href="{{.PieceHref}}"{{if .ByPiece}} aria-current="true"{{end}}>By piece</a>
   </span>
 </nav>
+
+<form method="get" action="/finished" class="finished-filters" data-autosubmit>
+  {{if .ByPiece}}<input type="hidden" name="view" value="pieces">{{end}}
+  {{template "filterSelect" (dict "Label" "Clay" "Name" "clay" "Options" .Options.Clays "Value" .Filters.Clay)}}
+  {{template "filterSelect" (dict "Label" "Glaze" "Name" "glaze" "Options" .Options.Glazes "Value" .Filters.Glaze)}}
+  {{template "filterSelect" (dict "Label" "Form" "Name" "form" "Options" .Options.Forms "Value" .Filters.Form)}}
+  {{with .Options.Studios}}{{template "filterSelect" (dict "Label" "Studio" "Name" "studio" "Options" . "Value" $.Filters.Studio)}}{{end}}
+  <noscript><button class="button" type="submit">Filter</button></noscript>
+</form>
+{{if .Filters.Any}}
+<p class="filter-result">{{if eq .Count 1}}1 piece{{else}}{{.Count}} pieces{{end}} · <a href="{{if .ByPiece}}/finished?view=pieces{{else}}/finished{{end}}">Clear filters</a></p>
+{{end}}
+
 {{range .Seasons}}
 <section class="group">
   <h2>{{.Season}}</h2>
@@ -18,6 +31,16 @@
   </div>
 </section>
 {{else}}
-<p class="empty">No finished pieces yet.</p>
+<p class="empty">{{if .Filters.Any}}No finished pieces match.{{else}}No finished pieces yet.{{end}}</p>
 {{end}}
+{{end}}
+
+{{/* One filter dropdown. Args: Label, Name, Options, Value. */}}
+{{define "filterSelect"}}
+<label class="field filter-field">{{.Label}}
+  <select name="{{.Name}}">
+    <option value="">Any</option>
+    {{range .Options}}<option{{if eq (lower .) (lower $.Value)}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+</label>
 {{end}}

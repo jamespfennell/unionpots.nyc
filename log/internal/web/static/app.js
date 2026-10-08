@@ -344,6 +344,15 @@
     link.hidden = true;
   });
 
+  // Filter forms apply as soon as a dropdown changes. Filters left at "Any"
+  // are left out of the address, so a bookmarked view reads cleanly.
+  document.addEventListener("change", function (e) {
+    var form = e.target.matches && e.target.matches("select") && e.target.closest("form[data-autosubmit]");
+    if (!form) return;
+    form.querySelectorAll("select").forEach(function (s) { s.disabled = s.value === ""; });
+    form.requestSubmit();
+  });
+
   // The menu closes when you tap anywhere else.
   document.addEventListener("click", function (e) {
     document.querySelectorAll("details[data-menu][open]").forEach(function (m) {

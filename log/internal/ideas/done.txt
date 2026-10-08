@@ -9,3 +9,4 @@ ebfaf112e0f6e41ce82e69058e2189b0  clay bodies no longer have a product code or p
 b1d6b06a8fd26708b7ddcf9816c88e8d  finished pieces show by project by default ("#127 +4", linking to the project), with a by-piece view
 0bb9ff678a3f38fae23534c3e2ac6069  studio filter has no "All": nothing selected shows every studio; tapping the selected studio deselects it
 b439ec59ce834bbe7f7282af2247648e  no App ideas in demo mode: no menu item, and the page, its actions and the feed are not found
+7a8bc8ca0cb2399863fb5f9d5dc422f3  finished pieces filter by clay, glaze, form (loose) and studio
