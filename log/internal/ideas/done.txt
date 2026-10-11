@@ -11,3 +11,4 @@ b1d6b06a8fd26708b7ddcf9816c88e8d  finished pieces show by project by default ("#
 b439ec59ce834bbe7f7282af2247648e  no App ideas in demo mode: no menu item, and the page, its actions and the feed are not found
 7a8bc8ca0cb2399863fb5f9d5dc422f3  finished pieces filter by clay, glaze, form (loose) and studio
 f1515eb5ffcbea48d7e8b6e2d6c161c9  a started piece's next step defaults to built (thrown still offered)
+171430ea056d550d45f02891852ec6f1  "ago" dates: no tilde; days, then months after a month, then years after a year

@@ -6,7 +6,7 @@
 {{with .Piece}}
 <a class="row" href="/pieces/{{.ID}}">
   <span class="pid">#{{.ID}}</span>
-  <span class="row-main">{{if not $.HideLabel}}{{with .Label}}<span class="name">{{.}}</span>{{end}}{{end}}<span class="ago"{{if .StateDateApprox}} title="Approximate date"{{end}}>{{if $.Dated}}{{stepDate .StateDate .StateDateApprox false}}{{else}}{{if .StateDateApprox}}~{{end}}{{daysAgo .StateDate $.Today}}{{end}}</span></span>
+  <span class="row-main">{{if not $.HideLabel}}{{with .Label}}<span class="name">{{.}}</span>{{end}}{{end}}<span class="ago"{{if .StateDateApprox}} title="Approximate date"{{end}}>{{if $.Dated}}{{stepDate .StateDate .StateDateApprox false}}{{else}}{{daysAgo .StateDate $.Today}}{{end}}</span></span>
   {{if $.ShowState}}<span class="row-end">{{.State.Label}}</span>{{end}}
 </a>
 {{end}}
@@ -184,7 +184,7 @@
 {{with .Line}}
 <a class="row row-project" href="{{.Href}}">
   <span class="pid">#{{.First}}{{if .More}} <span class="more">+{{.More}}</span>{{end}}</span>
-  <span class="row-main">{{with .Name}}<span class="name">{{.}}</span>{{end}}<span class="ago"{{if .DateApprox}} title="Approximate date"{{end}}>{{if $.Dated}}{{stepDate .Date .DateApprox false}}{{else}}{{if .DateApprox}}~{{end}}{{daysAgo .Date $.Today}}{{end}}</span></span>
+  <span class="row-main">{{with .Name}}<span class="name">{{.}}</span>{{end}}<span class="ago"{{if .DateApprox}} title="Approximate date"{{end}}>{{if $.Dated}}{{stepDate .Date .DateApprox false}}{{else}}{{daysAgo .Date $.Today}}{{end}}</span></span>
 </a>
 {{end}}
 {{end}}

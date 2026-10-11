@@ -304,7 +304,14 @@ func TestDaysAgo(t *testing.T) {
 		"2026-10-03": "today",
 		"2026-10-02": "yesterday",
 		"2026-09-24": "9 days ago",
-		"2025-10-03": "365 days ago",
+		"2026-09-04": "29 days ago",
+		"2026-09-03": "1 month ago",
+		"2026-09-04T": "2026-09-04T", // not a date: as-is
+		"2026-08-31": "1 month ago",
+		"2026-08-03": "2 months ago",
+		"2025-10-04": "11 months ago",
+		"2025-10-03": "1 year ago",
+		"2024-06-01": "2 years ago",
 		"2026-10-05": "2026-10-05", // future dates are shown as-is
 	} {
 		if got := daysAgo(date, "2026-10-03"); got != want {
@@ -945,7 +952,7 @@ func TestApproximateDates(t *testing.T) {
         <span class="date">2026</span>`) {
 		t.Errorf("the first step always has its year")
 	}
-	if home := a.do("GET", "/", nil).Body.String(); !strings.Contains(home, `title="Approximate date">~`) {
+	if home := a.do("GET", "/", nil).Body.String(); !strings.Contains(home, `title="Approximate date">25 days ago<`) {
 		t.Errorf("home row should mark an approximate state date")
 	}
 }

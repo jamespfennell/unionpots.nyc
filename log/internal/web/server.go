@@ -231,18 +231,32 @@ func staticURL(name string) string { return "/static/" + name + "?v=" + staticVe
 func daysAgo(date, today string) string {
 	d, err1 := time.Parse(model.DateLayout, date)
 	t, err2 := time.Parse(model.DateLayout, today)
-	if err1 != nil || err2 != nil {
-		return date
+	if err1 != nil || err2 != nil || d.After(t) {
+		return date // future dates are shown as-is
 	}
-	switch n := int(t.Sub(d).Hours() / 24); {
-	case n < 0:
-		return date
-	case n == 0:
+	// Whole calendar months between the dates: Jan 31 to Feb 28 is not yet
+	// a month, Jan 15 to Feb 15 is.
+	months := (t.Year()-d.Year())*12 + int(t.Month()-d.Month())
+	if t.Day() < d.Day() {
+		months--
+	}
+	plural := func(n int, unit string) string {
+		if n == 1 {
+			return "1 " + unit + " ago"
+		}
+		return fmt.Sprintf("%d %ss ago", n, unit)
+	}
+	switch days := int(t.Sub(d).Hours() / 24); {
+	case months >= 12:
+		return plural(months/12, "year")
+	case months >= 1:
+		return plural(months, "month")
+	case days == 0:
 		return "today"
-	case n == 1:
+	case days == 1:
 		return "yesterday"
 	default:
-		return fmt.Sprintf("%d days ago", n)
+		return fmt.Sprintf("%d days ago", days)
 	}
 }
 
