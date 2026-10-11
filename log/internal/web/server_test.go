@@ -1544,3 +1544,60 @@ func TestGlazeCommentaryIsPrivate(t *testing.T) {
 		t.Errorf("the public page shows the glaze, never the commentary")
 	}
 }
+
+func TestStepDates(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	ids, _ := a.store.CreatePieces(ctx, db.NewPieces{Count: 3, Name: "Dosers", Action: model.Thrown, Date: "2026-09-01"})
+	a.store.AddEvents(ctx, ids, model.Trimmed, "2026-09-08", db.StepDetails{})
+	events, _ := a.store.PieceEvents(ctx, ids[0])
+	trimmed := events[1]
+
+	page := a.do("GET", "/pieces/120/edit", nil).Body.String()
+	for _, want := range []string{`<section id="step-dates">`, `type="date" name="date" value="2026-09-08" min="2026-09-01" max="` + model.Today(a.srv.Now()) + `"`,
+		`type="date" name="date" value="2026-09-01" max="2026-09-08"`, "also #121, #122"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("edit page should contain %q", want)
+		}
+	}
+
+	hx := func(eid int64, form string) string {
+		req := httptest.NewRequest("POST", fmt.Sprintf("/pieces/120/events/%d/date", eid), strings.NewReader(form))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("HX-Request", "true")
+		req.AddCookie(a.cookie)
+		rec := httptest.NewRecorder()
+		a.h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d", rec.Code)
+		}
+		return rec.Body.String()
+	}
+	// Trimming moves to Sep 10 for all three; the section comes back alone.
+	body := hx(trimmed.ID, "date=2026-09-10&siblings=1")
+	if !strings.Contains(body, "Saved, also for #121, #122.") || strings.Contains(body, "<html") || !strings.Contains(body, `value="2026-09-10"`) {
+		t.Errorf("save with siblings: %s", body)
+	}
+	for _, id := range ids {
+		if ev, _ := a.store.PieceEvents(ctx, id); ev[1].Date != "2026-09-10" {
+			t.Errorf("#%d trimmed %s", id, ev[1].Date)
+		}
+	}
+	// Without siblings, only #120 moves; then only Thrown is still shared.
+	if body := hx(trimmed.ID, "date=2026-09-09"); !strings.Contains(body, "Saved.") || strings.Count(body, "also #") != 1 {
+		t.Errorf("save alone: %s", body)
+	}
+	// Before thrown: refused, shown in the section.
+	if body := hx(trimmed.ID, "date=2026-08-30"); !strings.Contains(body, `data-state="error"`) || !strings.Contains(body, "between 2026-09-01 and") {
+		t.Errorf("out of order: %s", body)
+	}
+	// Without the script: a plain post goes back to the edit page.
+	if rec := a.do("POST", fmt.Sprintf("/pieces/120/events/%d/date", events[0].ID), url.Values{"date": {"2026-09-02"}}); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/pieces/120/edit" {
+		t.Errorf("plain post: %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	if ev, _ := a.store.PieceEvents(ctx, ids[0]); ev[0].Date != "2026-09-02" {
+		t.Errorf("thrown = %s", ev[0].Date)
+	}
+}

@@ -344,6 +344,14 @@
     link.hidden = true;
   });
 
+  // Step dates save as soon as a date in range is picked (a half-typed
+  // date is out of range, so it waits).
+  document.addEventListener("change", function (e) {
+    var input = e.target;
+    if (!(input.matches && input.matches("form[data-step-date] input[type=date]"))) return;
+    if (input.value && input.checkValidity()) htmx.trigger(input.form, "save");
+  });
+
   // Filter forms apply as soon as a dropdown changes. Filters left at "Any"
   // are left out of the address, so a bookmarked view reads cleanly.
   document.addEventListener("change", function (e) {

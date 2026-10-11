@@ -13,3 +13,4 @@ b439ec59ce834bbe7f7282af2247648e  no App ideas in demo mode: no menu item, and t
 f1515eb5ffcbea48d7e8b6e2d6c161c9  a started piece's next step defaults to built (thrown still offered)
 171430ea056d550d45f02891852ec6f1  "ago" dates: no tilde; days, then months after a month, then years after a year
 aec512770780650b704ca71ef2775aea  "Glazes (public)" plus a private "Glaze commentary" box (edit page, glazing card, details; never public)
+12e1ccd0687d9f9218e1c489f590977f  step dates editable on the edit page, kept in order, with the same step of the project's other pieces by default

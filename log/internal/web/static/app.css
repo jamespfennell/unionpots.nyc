@@ -413,3 +413,10 @@ details.disclosure.inline { margin-top: 0; }
 .filter-field { flex: 1 1 8rem; min-width: 0; }
 .filter-field select { width: 100%; }
 .filter-result { margin: 0 0 1.25rem; font-size: 0.875rem; color: var(--muted); }
+
+/* Edit page: step dates, one row per step. */
+.step-dates { display: flex; flex-direction: column; gap: 0.75rem; }
+.step-date { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 1rem; }
+.step-date-field { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.25rem 1rem; flex: 1 1 100%; }
+.step-date-field input { width: 11rem; max-width: 100%; }
+.also-siblings { font-size: 0.875rem; color: var(--muted); }

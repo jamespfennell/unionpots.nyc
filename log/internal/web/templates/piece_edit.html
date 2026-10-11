@@ -42,6 +42,8 @@
   </form>
 </section>
 
+{{template "stepDates" .StepDates}}
+
 <section>
   <h2>Record something else</h2>
   <p class="hint">For anything other than the usual next step, or a different date.</p>
@@ -85,5 +87,31 @@
     </label>
     <button class="button danger" type="submit">Delete #{{$p.ID}} permanently</button>
   </form>
+</section>
+{{end}}
+
+{{/* Step dates: one form per step; the script saves a valid date as soon
+     as it's picked and swaps this section in place. */}}
+{{define "stepDates"}}
+<section id="step-dates">
+  <h2>Step dates{{with .Message}} <span class="save-status"{{if $.Failed}} data-state="error"{{end}} aria-live="polite">{{.}}</span>{{end}}</h2>
+  <div class="step-dates">
+    {{range .Rows}}
+    <form method="post" action="/pieces/{{$.PieceID}}/events/{{.EventID}}/date" class="step-date" data-step-date
+          hx-post="/pieces/{{$.PieceID}}/events/{{.EventID}}/date" hx-trigger="save" hx-target="#step-dates" hx-swap="outerHTML">
+      <label class="step-date-field">
+        <span>{{.Label}}{{if .Approximate}} <span class="muted">(approximate)</span>{{end}}</span>
+        <input type="date" name="date" value="{{.Date}}"{{with .Min}} min="{{.}}"{{end}} max="{{.Max}}" required>
+      </label>
+      {{with .Siblings}}
+      <label class="check also-siblings">
+        <input type="checkbox" name="siblings" value="1" checked>
+        <span>also {{range $i, $id := .}}{{if $i}}, {{end}}#{{$id}}{{end}}</span>
+      </label>
+      {{end}}
+      <noscript><button class="button" type="submit">Save</button></noscript>
+    </form>
+    {{end}}
+  </div>
 </section>
 {{end}}

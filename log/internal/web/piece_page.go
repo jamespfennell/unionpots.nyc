@@ -15,6 +15,7 @@ type piecePage struct {
 	Page
 	Piece        db.Piece
 	Events       []db.Event
+	StepDates    stepDates // the edit page's
 	History      []historyStep
 	Project      db.Project
 	ShowProject  bool
@@ -257,6 +258,9 @@ func (s *Server) pieceEdit(w http.ResponseWriter, r *http.Request) error {
 	}
 	pp.Title = "Edit " + pp.Piece.Title()
 	pp.Photos.Edit = true
+	if pp.StepDates, err = s.loadStepDates(r, pp.Piece.ID, pp.Events); err != nil {
+		return err
+	}
 	return s.render(w, http.StatusOK, "piece_edit", pp)
 }
 

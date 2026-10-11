@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("POST /pieces/{id}", s.handle(s.updatePiece))
 	private.Handle("POST /pieces/{id}/events", s.handle(s.addEvent))
 	private.Handle("POST /pieces/{id}/events/{eid}/delete", s.handle(s.deleteEvent))
+	private.Handle("POST /pieces/{id}/events/{eid}/date", s.handle(s.setStepDate))
 	private.Handle("POST /pieces/{id}/measurements", s.handle(s.updateMeasurements))
 	private.Handle("POST /pieces/{id}/ratings", s.handle(s.updateRatings))
 	private.Handle("POST /pieces/{id}/move", s.handle(s.movePiece))
