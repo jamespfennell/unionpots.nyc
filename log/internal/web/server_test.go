@@ -729,10 +729,10 @@ func TestStartedFlow(t *testing.T) {
 		t.Fatalf("Started should be the first home section")
 	}
 
-	// The card offers Thrown (default, with thrown size) or Built.
+	// The card offers Built (default) or Thrown (with thrown size).
 	page := a.do("GET", "/pieces/120", nil).Body.String()
-	for _, want := range []string{`name="action" value="thrown" class="visually-hidden" checked`, `name="action" value="built"`,
-		`data-show-for="thrown"`, "Thrown size", ">Mark thrown</button>"} {
+	for _, want := range []string{`name="action" value="built" class="visually-hidden" checked`, `name="action" value="thrown"`,
+		`data-show-for="thrown"`, "Thrown size", ">Mark built</button>"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("card should contain %q", want)
 		}

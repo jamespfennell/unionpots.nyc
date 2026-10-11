@@ -138,7 +138,7 @@ func (s State) Label() string {
 func (s State) Next() Action {
 	switch s {
 	case StateStarted:
-		return Thrown
+		return Built // started pieces are usually built over several sessions
 	case PendingTrimming:
 		return Trimmed
 	case Drying:
@@ -152,10 +152,10 @@ func (s State) Next() Action {
 }
 
 // NextOptions are the ways a piece can usually move on from this state:
-// thrown or built for a started piece, otherwise just Next.
+// built (the default) or thrown for a started piece, otherwise just Next.
 func (s State) NextOptions() []Action {
 	if s == StateStarted {
-		return []Action{Thrown, Built}
+		return []Action{Built, Thrown}
 	}
 	if n := s.Next(); n != "" {
 		return []Action{n}
