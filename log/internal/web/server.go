@@ -870,6 +870,11 @@ func (s *Server) updatePiece(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
+	if _, ok := r.Form["glaze_commentary"]; ok {
+		if err := s.Store.SetGlazeCommentary(r.Context(), id, r.FormValue("glaze_commentary")); err != nil {
+			return err
+		}
+	}
 	if _, ok := r.Form["glaze_text"]; ok {
 		if err := s.Store.SetGlazeText(r.Context(), id, r.FormValue("glaze_text")); err != nil {
 			return err
@@ -942,6 +947,7 @@ func (s *Server) addEvent(w http.ResponseWriter, r *http.Request) error {
 	}
 	if action == model.Glazed {
 		details.GlazeText = r.FormValue("glaze_text")
+		details.GlazeCommentary = r.FormValue("glaze_commentary")
 	}
 	if err := s.Store.AddEvents(r.Context(), ids, action, date, details); err != nil {
 		return err

@@ -314,8 +314,9 @@ func (s *Store) PieceEvents(ctx context.Context, pieceID int64) ([]Event, error)
 // StepDetails is what can be recorded along with a step, for every piece in
 // it: dimensions (for measured steps) and glaze text (when glazing).
 type StepDetails struct {
-	Dims      model.Dims
-	GlazeText string
+	Dims            model.Dims
+	GlazeText       string
+	GlazeCommentary string // private notes on the glaze
 }
 
 // AddEvents records action happening to each of the pieces on date, along
@@ -346,6 +347,11 @@ func (s *Store) AddEvents(ctx context.Context, pieceIDs []int64, action model.Ac
 			}
 			if t := strings.TrimSpace(details.GlazeText); action == model.Glazed && t != "" {
 				if err := setGlazeText(ctx, tx, id, t); err != nil {
+					return struct{}{}, err
+				}
+			}
+			if t := strings.TrimSpace(details.GlazeCommentary); action == model.Glazed && t != "" {
+				if err := setMeta(ctx, tx, id, glazeCommentaryKey, t, false); err != nil {
 					return struct{}{}, err
 				}
 			}

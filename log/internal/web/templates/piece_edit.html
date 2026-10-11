@@ -21,7 +21,7 @@
     {{template "studioPills" (dict "Studios" .Studios "Selected" $p.StudioID)}}
     {{template "clayPills" (dict "Clays" .Clays "Selected" .ClayIDs)}}
     {{if .ShowGlazes}}
-    {{template "glazeInputs" (dict "Text" .Details.GlazeText "Names" .GlazeNames)}}
+    {{template "glazeInputs" (dict "Text" .Details.GlazeText "Names" .GlazeNames "Commentary" .Details.GlazeCommentary)}}
     {{end}}
   </form>
 </section>

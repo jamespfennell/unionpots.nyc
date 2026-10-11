@@ -15,20 +15,24 @@ const (
 	formKey      = "form"       // JSON string, e.g. "bowl"
 	glazeTextKey = "glaze_text" // JSON string as written: "Pink with dabs of Red"
 	glazesKey    = "glazes"     // JSON list: known glazes found in glaze_text, for search
+	// JSON string: private notes on how the glaze looked and was applied
+	// (never on the public page, unlike glaze_text).
+	glazeCommentaryKey = "glaze_commentary"
 )
 
 // PieceDetails are a piece's free-text details.
 type PieceDetails struct {
-	Form      string
-	GlazeText string   // as written
-	Glazes    []string // known glaze names found in GlazeText
+	Form            string
+	GlazeText       string   // as written; public
+	Glazes          []string // known glaze names found in GlazeText
+	GlazeCommentary string   // private
 }
 
 func (s *Store) GetDetails(ctx context.Context, pieceID int64) (PieceDetails, error) {
 	var d PieceDetails
 	rows, err := s.DB.QueryContext(ctx,
-		"SELECT key, value FROM metadata WHERE piece_id = ? AND key IN (?, ?, ?) AND value IS NOT NULL",
-		pieceID, formKey, glazeTextKey, glazesKey)
+		"SELECT key, value FROM metadata WHERE piece_id = ? AND key IN (?, ?, ?, ?) AND value IS NOT NULL",
+		pieceID, formKey, glazeTextKey, glazesKey, glazeCommentaryKey)
 	if err != nil {
 		return d, err
 	}
@@ -46,12 +50,23 @@ func (s *Store) GetDetails(ctx context.Context, pieceID int64) (PieceDetails, er
 			dst = &d.GlazeText
 		case glazesKey:
 			dst = &d.Glazes
+		case glazeCommentaryKey:
+			dst = &d.GlazeCommentary
 		}
 		if err := json.Unmarshal([]byte(value), dst); err != nil {
 			return d, err
 		}
 	}
 	return d, rows.Err()
+}
+
+// SetGlazeCommentary saves the private notes on the glaze ("" clears them).
+func (s *Store) SetGlazeCommentary(ctx context.Context, pieceID int64, text string) error {
+	_, err := withTx(ctx, s.DB, func(tx *sql.Tx) (struct{}, error) {
+		text := strings.TrimSpace(text)
+		return struct{}{}, setMeta(ctx, tx, pieceID, glazeCommentaryKey, text, text == "")
+	})
+	return err
 }
 
 func (s *Store) SetForm(ctx context.Context, pieceID int64, form string) error {

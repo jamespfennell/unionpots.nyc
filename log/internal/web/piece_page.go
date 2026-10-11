@@ -182,6 +182,9 @@ func pieceFacts(events []db.Event, m db.Measurements, clays []db.Clay, d db.Piec
 	if d.GlazeText != "" {
 		facts = append(facts, fact{Label: "Glazes", Text: glazeSegments(d.GlazeText, glazes)})
 	}
+	if d.GlazeCommentary != "" {
+		facts = append(facts, textFact("Glaze commentary", d.GlazeCommentary))
+	}
 	return facts
 }
 

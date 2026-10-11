@@ -68,7 +68,7 @@
 {{define "glazeInputs"}}
 <div class="glaze-entry" data-glaze-entry data-glaze-names="{{json .Names}}">
   <label class="field">
-    <span>Glazes <span class="legend-link">(<a href="/glazes">manage glazes</a>)</span></span>
+    <span>Glazes (public) <span class="legend-link">(<a href="/glazes">manage glazes</a>)</span></span>
     <textarea name="glaze_text" rows="2" autocomplete="off" placeholder="e.g. Pink with dabs of Red" data-glaze-text>{{.Text}}</textarea>
   </label>
   <div class="pill-row glaze-suggest" data-glaze-suggest hidden></div>
@@ -79,6 +79,9 @@
     <button type="button" class="button" data-glaze-add-save>Add</button>
   </span>
 </div>
+<label class="field">Glaze commentary (private)
+  <textarea name="glaze_commentary" rows="2" autocomplete="off" placeholder="How it came out, how it was applied">{{.Commentary}}</textarea>
+</label>
 {{end}}
 
 {{/* Pieces in the same project and state that an action can also apply to.

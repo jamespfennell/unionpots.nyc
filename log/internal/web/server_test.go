@@ -301,18 +301,18 @@ func TestLoginPageRenders(t *testing.T) {
 
 func TestDaysAgo(t *testing.T) {
 	for date, want := range map[string]string{
-		"2026-10-03": "today",
-		"2026-10-02": "yesterday",
-		"2026-09-24": "9 days ago",
-		"2026-09-04": "29 days ago",
-		"2026-09-03": "1 month ago",
+		"2026-10-03":  "today",
+		"2026-10-02":  "yesterday",
+		"2026-09-24":  "9 days ago",
+		"2026-09-04":  "29 days ago",
+		"2026-09-03":  "1 month ago",
 		"2026-09-04T": "2026-09-04T", // not a date: as-is
-		"2026-08-31": "1 month ago",
-		"2026-08-03": "2 months ago",
-		"2025-10-04": "11 months ago",
-		"2025-10-03": "1 year ago",
-		"2024-06-01": "2 years ago",
-		"2026-10-05": "2026-10-05", // future dates are shown as-is
+		"2026-08-31":  "1 month ago",
+		"2026-08-03":  "2 months ago",
+		"2025-10-04":  "11 months ago",
+		"2025-10-03":  "1 year ago",
+		"2024-06-01":  "2 years ago",
+		"2026-10-05":  "2026-10-05", // future dates are shown as-is
 	} {
 		if got := daysAgo(date, "2026-10-03"); got != want {
 			t.Errorf("daysAgo(%s) = %q, want %q", date, got, want)
@@ -1510,5 +1510,37 @@ func TestFinishedFilters(t *testing.T) {
 	}
 	if !strings.Contains(a.do("GET", "/finished?clay=Black&studio=Powerhouse", nil).Body.String(), "No finished pieces match.") {
 		t.Errorf("an empty result should say so")
+	}
+}
+
+func TestGlazeCommentaryIsPrivate(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	a.store.EnsureGlaze(ctx, "Nutmeg")
+	ids, _ := a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Name: "Bowl", Action: model.QueuedBisque, Date: "2026-09-01"})
+	page := a.do("GET", "/pieces/120", nil).Body.String()
+	if !strings.Contains(page, "Glazes (public)") || !strings.Contains(page, `name="glaze_commentary"`) {
+		t.Fatalf("the glazing card should have both boxes")
+	}
+	a.do("POST", "/pieces/120/events", url.Values{"action": {"glazed"}, "glaze_text": {"Nutmeg"}, "glaze_commentary": {"dipped 3s, thin at the rim"}})
+	if d, _ := a.store.GetDetails(ctx, ids[0]); d.GlazeText != "Nutmeg" || d.GlazeCommentary != "dipped 3s, thin at the rim" {
+		t.Fatalf("details = %+v", d)
+	}
+	a.do("POST", "/pieces/120", url.Values{"glaze_commentary": {"dipped 3s; ran a little"}})
+	if d, _ := a.store.GetDetails(ctx, ids[0]); d.GlazeCommentary != "dipped 3s; ran a little" || d.GlazeText != "Nutmeg" {
+		t.Fatalf("edit: %+v", d)
+	}
+	if !strings.Contains(a.do("GET", "/pieces/120", nil).Body.String(), "dipped 3s; ran a little") {
+		t.Errorf("the piece's details should show the commentary")
+	}
+	if !strings.Contains(a.do("GET", "/pieces/120/edit", nil).Body.String(), "dipped 3s; ran a little</textarea>") {
+		t.Errorf("the edit page should show the commentary")
+	}
+	a.do("POST", "/pieces/120/events", url.Values{"action": {"finished"}})
+	a.cookie = nil
+	public := a.do("GET", "/p/120", nil).Body.String()
+	if !strings.Contains(public, "nutmeg") || strings.Contains(public, "dipped") {
+		t.Errorf("the public page shows the glaze, never the commentary")
 	}
 }
