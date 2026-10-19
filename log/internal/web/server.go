@@ -37,8 +37,8 @@ type Server struct {
 	Store  *db.Store
 	Auth   *Auth
 	Backup func() backup.Status
-	// Snapshots lists the stored backups (nil when backups are off).
-	Snapshots func(context.Context) ([]backup.Snapshot, error)
+	// Stored lists the backups each target holds (nil when backups are off).
+	Stored func(context.Context) []backup.Stored
 	// LoginMessage, if set, is shown on the login page (the demo's password).
 	LoginMessage string
 	// DefaultPassword means no password was configured, so it's the
@@ -413,10 +413,14 @@ func (s *Server) page(r *http.Request, title string) Page {
 		p.Banners = append(p.Banners, banner{Text: "Backups misconfigured: " + st.Problem, Warning: true})
 	case !st.Enabled:
 		p.Banners = append(p.Banners, banner{Text: "Backups disabled", Warning: true})
-	case st.LastOK.IsZero() && st.LastError != "":
-		p.Banners = append(p.Banners, banner{Text: "Backups not working: " + shorten(st.LastError, 120) + " (see Backups)", Warning: true})
-	case st.Stale(s.Now()):
-		p.Banners = append(p.Banners, banner{Text: "Backups failing: last success " + ago(st.LastOK, s.Now()), Warning: true})
+	}
+	for _, t := range st.Targets {
+		switch {
+		case t.LastOK.IsZero() && t.LastError != "":
+			p.Banners = append(p.Banners, banner{Text: "Backups to " + t.Name + " not working: " + shorten(t.LastError, 120) + " (see Backups)", Warning: true})
+		case t.Stale(s.Now()):
+			p.Banners = append(p.Banners, banner{Text: "Backups to " + t.Name + " failing: last success " + ago(t.LastOK, s.Now()), Warning: true})
+		}
 	}
 	return p
 }
@@ -573,27 +577,43 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
 	return redirect(w, r, safeNext(r.FormValue("next")))
 }
 
-// backups shows the backup policy, what's stored and how the last runs went.
+// backupTarget is one target on the backups page.
+type backupTarget struct {
+	backup.TargetStatus
+	Count          int
+	Oldest, Newest time.Time
+	ListError      string
+}
+
+// backups shows the backup policy and, for each target, what's stored and
+// how the last runs went.
 func (s *Server) backups(w http.ResponseWriter, r *http.Request) error {
+	st := s.Backup()
 	data := struct {
 		Page
 		Status          backup.Status
+		Targets         []backupTarget
 		Now             time.Time
 		IntervalMinutes int
 		RetentionDays   int
-		Count           int
-		Oldest, Newest  time.Time
-		ListError       string
-	}{Page: s.page(r, "Backups"), Status: s.Backup(), Now: s.Now(),
+	}{Page: s.page(r, "Backups"), Status: st, Now: s.Now(),
 		IntervalMinutes: int(backup.Interval.Minutes()), RetentionDays: int(backup.Retention.Hours() / 24)}
-	if s.Snapshots != nil {
-		snaps, err := s.Snapshots(r.Context())
-		if err != nil {
-			s.Log.Error("listing backups", "err", err)
-			data.ListError = "Couldn’t list the stored backups right now."
-		} else if len(snaps) > 0 {
-			data.Count, data.Oldest, data.Newest = len(snaps), snaps[0].At, snaps[len(snaps)-1].At
+	stored := map[string]backup.Stored{}
+	if s.Stored != nil {
+		for _, sd := range s.Stored(r.Context()) {
+			stored[sd.Target] = sd
 		}
+	}
+	for _, ts := range st.Targets {
+		t := backupTarget{TargetStatus: ts}
+		switch sd := stored[ts.Name]; {
+		case sd.Err != nil:
+			s.Log.Error("listing backups", "target", ts.Name, "err", sd.Err)
+			t.ListError = "Couldn’t list the stored backups right now."
+		case len(sd.Snapshots) > 0:
+			t.Count, t.Oldest, t.Newest = len(sd.Snapshots), sd.Snapshots[0].At, sd.Snapshots[len(sd.Snapshots)-1].At
+		}
+		data.Targets = append(data.Targets, t)
 	}
 	return s.render(w, http.StatusOK, "backups", data)
 }

@@ -1,37 +1,33 @@
 {{define "content"}}
 <h1>Backups</h1>
 {{if .Status.Enabled}}
-<p>The database is checked every {{.IntervalMinutes}} minutes and copied when something has changed (and once more when the app stops). Copies are kept for {{.RetentionDays}} days; the newest copy is never deleted, so there is always at least one.</p>
+<p>The database is checked every {{.IntervalMinutes}} minutes and copied when something has changed (and once more when the app stops). Copies are kept for {{.RetentionDays}} days; the newest copy is never deleted, so there is always at least one.{{if gt (len .Targets) 1}} Each location below gets its own copies, and is caught up by itself after it has been down.{{end}}</p>
 
+{{range .Targets}}
 <section>
-  <h2>Stored</h2>
+  <h2>{{.Name}}</h2>
   {{with .ListError}}<p class="error">{{.}}</p>{{else}}
   {{if .Count}}
   <dl class="facts">
     <div><dt>Backups</dt><dd>{{.Count}}</dd></div>
     <div><dt>Newest</dt><dd>{{ago .Newest $.Now}}<span class="fact-note">{{.Newest.Format "2 Jan 2006, 15:04 MST"}}</span></dd></div>
     <div><dt>Oldest</dt><dd>{{ago .Oldest $.Now}}<span class="fact-note">{{.Oldest.Format "2 Jan 2006, 15:04 MST"}}</span></dd></div>
-    <div><dt>Location</dt><dd>{{.Status.Target}}</dd></div>
   </dl>
   {{else}}
   <p class="empty">No backups stored yet.</p>
   {{end}}
   {{end}}
-</section>
-
-<section>
-  <h2>Last runs</h2>
-  {{with .Status}}
   <dl class="facts">
+    <div><dt>Location</dt><dd>{{.Location}}</dd></div>
     <div><dt>Last check</dt><dd>{{ago .LastOK $.Now}}</dd></div>
     <div><dt>Last copy uploaded</dt><dd>{{ago .LastUpload $.Now}}</dd></div>
     {{if .LastError}}<div><dt>Last error</dt><dd class="error">{{.LastError}}<span class="fact-note">{{ago .LastErrorAt $.Now}}</span></dd></div>{{end}}
   </dl>
-  {{end}}
 </section>
+{{end}}
 {{else if .Status.Problem}}
 <p class="error">Backups are misconfigured ({{.Status.Problem}}), so nothing is being copied off this machine.</p>
 {{else}}
-<p class="error">Backups are off: no backup storage is configured (the <code>-spaces-…</code> flags), so nothing is being copied off this machine.</p>
+<p class="error">Backups are off: no backup storage is configured (<code>-backup-config</code>), so nothing is being copied off this machine.</p>
 {{end}}
 {{end}}

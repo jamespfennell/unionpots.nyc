@@ -30,13 +30,8 @@ func TestPhotos(t *testing.T) {
 		t.Fatalf("order added: %+v", ps)
 	}
 
-	pending, _ := s.PhotosNotBackedUp(ctx)
-	if len(pending) != 2 {
-		t.Fatalf("pending = %d", len(pending))
-	}
-	s.MarkPhotoBackedUp(ctx, a.ID)
-	if pending, _ = s.PhotosNotBackedUp(ctx); len(pending) != 1 || pending[0].ID != b.ID {
-		t.Fatalf("after backup: %+v", pending)
+	if all, _ := s.AllPhotos(ctx); len(all) != 2 || all[0].ID != a.ID {
+		t.Fatalf("all photos: %+v", all)
 	}
 
 	if _, err := s.DeletePhoto(ctx, ids[1], a.ID); !errors.Is(err, ErrNotFound) {

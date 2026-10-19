@@ -13,7 +13,7 @@ document is the source of truth for decisions made so far.
 | Client | Responsive, mobile-first web app (installable PWA manifest, no offline mode). Studio connectivity is good, so it's online-only. |
 | Stack | Go (stdlib `net/http`, `html/template`) + htmx, SQLite, photos on local disk. |
 | Hosting | Existing DigitalOcean VM, Docker container, data on the VM disk, behind the existing Caddy. |
-| Backups | DigitalOcean Spaces (S3-compatible): in-app DB snapshot every 10 minutes when changed (≤10 min data loss), kept 30 days, always at least one; mirrored photo objects. No Litestream. |
+| Backups | One or more S3-compatible buckets (DigitalOcean Spaces, …), each independent: in-app DB snapshot every 10 minutes when changed (≤10 min data loss), kept 30 days, always at least one; mirrored photo objects. No Litestream. |
 | Actions & states | History is dated actions (started, thrown, built, trimmed, queued for bisque, glazed, finished, broken). The current state is what the piece is waiting for: started → waiting to be trimmed → drying → waiting to be bisque fired → waiting to be glaze fired → finished / broken. |
 | Ratings | glaze / shape / overall, 1–5, only once a piece is finished. |
 | Metadata | Typed fields for the searchable things (form, clays, glazes, weight, 3-D dimensions, ratings) + free-form key/value + notes. Project-level values are inherited by pieces. |
@@ -230,8 +230,7 @@ CREATE TABLE photos (
   original_ext  TEXT NOT NULL,
   public        INTEGER NOT NULL DEFAULT 0,
   position      INTEGER NOT NULL DEFAULT 0,
-  created_at    TEXT NOT NULL,
-  backed_up_at  TEXT                          -- NULL until mirrored to Spaces
+  created_at    TEXT NOT NULL
 );
 
 CREATE VIEW effective_metadata AS
@@ -366,8 +365,10 @@ log/
 ### 5.4 Configuration (flags)
 
 Everything is a command-line flag; no environment variables (the README has
-the full list). Storage flags (`-data-dir`, `-spaces-*`, `-backup-prefix`,
-`-backup-dir`) are shared by every command and may come before the command,
+the full list), except the backup targets, which are a YAML file named by
+`-backup-config`. Storage flags (`-data-dir`, `-backup-config`,
+`-backup-dir`, and the deprecated `-spaces-*` and `-backup-prefix`) are
+shared by every command and may come before the command,
 so a compose `entrypoint` can hold them for both `serve` and `restore`.
 `serve` adds `-addr`, `-password-hash`, `-allow-empty-db`
 and `-demo`. With no flags at all the app runs: default password, no
@@ -419,10 +420,10 @@ real log.
 - Entrypoint: `/app/log`, command `serve`. Backups run inside the process (§6), so
   there's no wrapper script or second process.
 - If `/data/log.db` is missing at startup, the app does **not** auto-restore.
-  It creates an empty DB only when the bucket has no backups, and otherwise
-  refuses to start with "backups exist in Spaces; run `log restore` or pass
-  `-allow-empty-db`". If the bucket can't be reached to check, it also
-  refuses (this is the disaster-recovery moment). That stops a mis-mounted volume from silently
+  It creates an empty DB only when no target has backups, and otherwise
+  refuses to start with "backups exist in …; run `log restore` or pass
+  `-allow-empty-db`". If any target can't be reached to check, or the backup
+  configuration is broken, it also refuses (this is the disaster-recovery moment). That stops a mis-mounted volume from silently
   starting fresh (and then backing up an empty DB).
 - CI: one workflow, `.github/workflows/ci.yml`, with two jobs: the website
   image and the log image (`go vet`, `go test`, then build and push
@@ -483,7 +484,7 @@ graceful shutdown (SIGTERM):
    the bucket (e.g. older layouts from before launch) is ignored and can be
    deleted by hand.
 6. Record the result (time, size, success/error) in memory for the
-   banner. The last uploaded hash lives in `/data/backup-state.json`, not the DB,
+   banner. The last uploaded hash lives in `/data/backup-state-<target>.json`, not the DB,
    so recording a backup never itself counts as a change.
 
 If an upload fails, the next run retries, since the stored hash hasn't
@@ -497,12 +498,16 @@ The app also takes a snapshot automatically before applying any new schema
 migration.
 
 **No bucket configured:** the app runs without backups and every page shows
-a "Backups disabled" banner. **Misconfigured** (some `-spaces-*` flags
-missing) or **unreachable** bucket: it still runs, with a banner saying
-what's wrong ("Backups misconfigured: missing -spaces-secret", "Backups not
-working: …"), and an unreachable bucket is retried every run. It refuses to
-start only when carrying on could lose data: `log.db` missing and the bucket
-can't be checked, or a migration due and its backup fails.
+a "Backups disabled" banner. **Misconfigured** (a broken `-backup-config`)
+or **unreachable** target: it still runs, with a banner saying what's wrong
+("Backups misconfigured: …", "Backups to r2 not working: …"), and an
+unreachable target is retried every run. **Several targets** are
+independent: each has its own change detection, pruning, status and
+per-run time limit, and catches up on photos and the database by itself
+after being down or when newly added. It refuses to start only when
+carrying on could lose data: `log.db` missing and the configuration broken
+or a target can't be checked, or a migration due and its backup reaches no
+target.
 
 **Photos:**
 - Photo files are immutable and content-addressed. Right after an upload the

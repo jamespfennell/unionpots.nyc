@@ -17,7 +17,6 @@ type Photo struct {
 	Ext           string
 	Width, Height int
 	CreatedAt     string
-	BackedUp      bool
 }
 
 // Aspect is width ÷ height (of the upright photo), for laying out
@@ -29,11 +28,11 @@ func (p Photo) Aspect() string {
 	return strconv.FormatFloat(float64(p.Width)/float64(p.Height), 'f', 4, 64)
 }
 
-const photoColumns = `id, COALESCE(piece_id, 0), sha256, original_ext, width, height, created_at, backed_up_at IS NOT NULL`
+const photoColumns = `id, COALESCE(piece_id, 0), sha256, original_ext, width, height, created_at`
 
 func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 	var p Photo
-	err := row.Scan(&p.ID, &p.PieceID, &p.SHA256, &p.Ext, &p.Width, &p.Height, &p.CreatedAt, &p.BackedUp)
+	err := row.Scan(&p.ID, &p.PieceID, &p.SHA256, &p.Ext, &p.Width, &p.Height, &p.CreatedAt)
 	return p, err
 }
 
@@ -116,15 +115,10 @@ func (s *Store) DeletePhoto(ctx context.Context, pieceID, photoID int64) (Photo,
 	return p, err
 }
 
-// PhotosNotBackedUp lists photos whose files haven't been copied to backup
-// storage yet.
-func (s *Store) PhotosNotBackedUp(ctx context.Context) ([]Photo, error) {
-	return s.queryPhotos(ctx, "WHERE backed_up_at IS NULL ORDER BY id")
-}
-
-func (s *Store) MarkPhotoBackedUp(ctx context.Context, id int64) error {
-	_, err := s.DB.ExecContext(ctx, "UPDATE photos SET backed_up_at = ? WHERE id = ?", now(), id)
-	return err
+// AllPhotos lists every photo, including ones left over from deleted
+// pieces (their files are kept, and backed up).
+func (s *Store) AllPhotos(ctx context.Context) ([]Photo, error) {
+	return s.queryPhotos(ctx, "ORDER BY id")
 }
 
 func isForeignKeyError(err error) bool {

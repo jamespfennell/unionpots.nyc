@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -816,12 +817,20 @@ func TestBackupsPageShowsPolicyAndStoredCopies(t *testing.T) {
 	a := newApp(t)
 	now := time.Date(2026, 10, 3, 15, 0, 0, 0, time.UTC)
 	srv := &Server{Store: a.store, Auth: &Auth{PasswordHash: nil, Secret: []byte(strings.Repeat("s", 32)), Now: func() time.Time { return now }},
-		Backup: func() backup.Status { return backup.Status{Enabled: true, Target: "s3://bucket/prod", LastOK: now} },
-		Snapshots: func(context.Context) ([]backup.Snapshot, error) {
-			return []backup.Snapshot{
-				{Key: "db/snapshots/a", At: now.AddDate(0, 0, -29)},
-				{Key: "db/snapshots/b", At: now.Add(-10 * time.Minute)},
-			}, nil
+		Backup: func() backup.Status {
+			return backup.Status{Enabled: true, Targets: []backup.TargetStatus{
+				{Name: "spaces", Location: "s3://bucket/prod", LastOK: now},
+				{Name: "r2", Location: "s3://other/prod", LastError: "AccessDenied", LastErrorAt: now},
+			}}
+		},
+		Stored: func(context.Context) []backup.Stored {
+			return []backup.Stored{
+				{Target: "spaces", Snapshots: []backup.Snapshot{
+					{Key: "db/snapshots/a", At: now.AddDate(0, 0, -29)},
+					{Key: "db/snapshots/b", At: now.Add(-10 * time.Minute)},
+				}},
+				{Target: "r2", Err: errors.New("AccessDenied")},
+			}
 		},
 		Now: func() time.Time { return now }, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h := srv.Handler()
@@ -831,7 +840,8 @@ func TestBackupsPageShowsPolicyAndStoredCopies(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	for _, want := range []string{"every 10 minutes", "kept for 30 days", "never deleted", "<dd>2</dd>", "10 min ago", "29 days ago", "s3://bucket/prod"} {
+	for _, want := range []string{"every 10 minutes", "kept for 30 days", "never deleted", "<dd>2</dd>", "10 min ago", "29 days ago", "s3://bucket/prod",
+		"<h2>spaces</h2>", "<h2>r2</h2>", "s3://other/prod", "Couldn’t list the stored backups", "AccessDenied"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("backups page should contain %q", want)
 		}
@@ -858,10 +868,22 @@ func TestBanners(t *testing.T) {
 		t.Errorf("default password + misconfigured: %q", got)
 	}
 	a.srv.Backup = func() backup.Status {
-		return backup.Status{Enabled: true, LastError: "InvalidAccessKeyId: the key is wrong", LastErrorAt: a.srv.Now()}
+		return backup.Status{Enabled: true, Targets: []backup.TargetStatus{
+			{Name: "spaces", LastOK: a.srv.Now()},
+			{Name: "r2", LastError: "InvalidAccessKeyId: the key is wrong", LastErrorAt: a.srv.Now()},
+		}}
 	}
-	if got := banners(); !strings.Contains(got, "Backups not working: InvalidAccessKeyId: the key is wrong (see Backups)") {
-		t.Errorf("never worked: %q", got)
+	if got := banners(); got != "Using the default password: set one with -password-hash | Backups to r2 not working: InvalidAccessKeyId: the key is wrong (see Backups)" {
+		t.Errorf("one target never worked: %q", got)
+	}
+	a.srv.Backup = func() backup.Status {
+		return backup.Status{Enabled: true, Targets: []backup.TargetStatus{
+			{Name: "spaces", LastOK: a.srv.Now().Add(-3 * time.Hour)},
+			{Name: "r2", LastOK: a.srv.Now()},
+		}}
+	}
+	if got := banners(); !strings.HasSuffix(got, "Backups to spaces failing: last success 3 h ago") {
+		t.Errorf("one target stale: %q", got)
 	}
 	// Logged out: no warnings (they'd tell anyone the password is the default).
 	a.cookie = nil

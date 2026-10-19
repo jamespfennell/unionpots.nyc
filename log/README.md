@@ -20,8 +20,8 @@ banner says so on every page. To try backups locally add
 
 ## Configuration
 
-Everything is a flag; there are no environment variables. Run
-`log <command> -h` for the full list.
+Everything is a flag or the backup config file; there are no environment
+variables. Run `log <command> -h` for the full list.
 
 **Storage flags**: shared by every command. They can go before the command
 (`log -data-dir /data serve`) or after it (`log serve -data-dir /data`).
@@ -29,20 +29,56 @@ Everything is a flag; there are no environment variables. Run
 | Flag | Purpose |
 |---|---|
 | `-data-dir` | Holds `log.db`, `photos/` and `session-secret`. Default `./data` (`/data` in the image). |
-| `-spaces-endpoint` | e.g. `https://nyc3.digitaloceanspaces.com` |
-| `-spaces-region` | e.g. `nyc3` |
-| `-spaces-bucket` | Bucket name. |
-| `-spaces-key`, `-spaces-secret` | Spaces access key. |
-| `-backup-prefix` | Folder inside the bucket for this deployment, e.g. `prod` (default: the bucket's top level). Several deployments can share a bucket; each only sees, restores and prunes its own objects. |
-| `-backup-dir` | Back up to a local directory instead of Spaces (testing). |
+| `-backup-config` | YAML file listing where backups go (below). |
+| `-backup-dir` | Back up to a local directory instead (testing). |
+| `-spaces-*`, `-backup-prefix` | Deprecated: a single bucket, from before `-backup-config`. Can't be combined with it. |
 
-Backups are on when all five `-spaces-*` flags are set (or `-backup-dir`).
-With none of them, backups are off and a banner says "Backups disabled". If
-only some are set, or the bucket can't be reached, the app still runs, with
-a banner saying what's wrong, and keeps retrying every 10 minutes. It only
-refuses to start when that could lose data: when `log.db` is missing and the
-bucket can't be checked for backups to restore, or when a schema migration
-is due and the backup before it fails.
+**Backup config.** Every target gets the same backups: each is a bucket
+(`endpoint`, `region`, `bucket`, `key`, `secret`) or a local `dir`, and
+`prefix` is an optional folder inside it for this deployment, e.g. `prod`.
+Several deployments can share a bucket; each only sees, restores and prunes
+its own objects. The file holds credentials: keep it `chmod 600` and out of
+git.
+
+```yaml
+targets:
+  - name: spaces
+    endpoint: https://nyc3.digitaloceanspaces.com
+    region: nyc3
+    bucket: unionpots-log
+    key: <key>
+    secret: <secret>
+    prefix: prod
+  - name: r2
+    endpoint: https://<account-id>.r2.cloudflarestorage.com
+    region: auto
+    bucket: unionpots-log
+    key: <key>
+    secret: <secret>
+    prefix: prod
+```
+
+Unknown or repeated fields are errors. So is any unquoted value YAML would
+read as something other than text, such as `012345` (a number) or `true`:
+put those in quotes.
+
+Targets are independent and backed up at the same time. Each has its own
+change detection (`backup-state-<name>.json` in the data directory),
+pruning and status, and each run gives a target at most 5 minutes, so one
+that is down or slow doesn't hold up the others. Photos are synced by
+listing what each target holds, so a new target, or one that was down,
+catches up by itself: the next run uploads the photos it is missing and a
+copy of the database.
+The Backups page shows each target, and the banner names any that are
+failing.
+
+With no backup configuration, backups are off and a banner says "Backups
+disabled". If the configuration is broken, or a target can't be reached, the
+app still runs, with a banner saying what's wrong, and keeps retrying every
+10 minutes. It only refuses to start when that could lose data: when
+`log.db` is missing and the configuration is broken or any target can't be
+checked for backups to restore, or when a schema migration is due and the
+backup before it reaches no target.
 
 **`serve` flags:**
 
@@ -65,7 +101,8 @@ out. (Not offered in the demo.)
 ```
 log serve            run the app; backs up every 10 minutes when the DB changed, and on shutdown
 log backup           back up now (no-op if unchanged)
-log restore          restore newest snapshot + photos into -data-dir
+log restore          restore the newest snapshot in any target + photos into -data-dir
+  -from r2           only look in this target
   -at 2026-10-01     newest snapshot on or before a date
   -key db/snapshots/…  an exact snapshot
 log hash-password    read a password, print its bcrypt hash
@@ -75,16 +112,19 @@ log hash-password    read a password, print its bcrypt hash
 
 One-time setup:
 
-1. **Spaces**: create a bucket and an access key scoped to it (read, write
-   and delete). Turn on versioning. No lifecycle rule is needed: the app
-   deletes backups older than 30 days itself, always keeping the newest one.
+1. **Buckets**: for each target, create a bucket and an access key scoped to
+   it (read, write and delete), and turn on versioning where the provider
+   has it. No lifecycle rule is needed: the app deletes backups older than
+   30 days itself, always keeping the newest one. List them in a backup
+   config file next to the compose file (see Configuration).
 2. **DNS**: an A record for `log.unionpots.nyc` pointing at the VM.
 3. **Password**: `go run ./cmd/log hash-password` (or
    `docker run --rm -it jamespfennell/log.unionpots.nyc hash-password`).
-4. **Compose service**, in the compose file on the VM (keep it `chmod 600`;
-   it holds credentials). The storage flags go in `entrypoint`, so that
-   `docker compose run … restore` (see `restore.sh`) uses them too; `serve`'s
-   own flags go in `command`:
+4. **Compose service**, in the compose file on the VM. The storage flags go
+   in `entrypoint`, so that `docker compose run … restore` (see
+   `restore.sh`) uses them too; `serve`'s own flags go in `command`. The
+   backup config is mounted outside `./data`, since a restore moves that
+   aside:
 
    ```yaml
    services:
@@ -93,17 +133,14 @@ One-time setup:
        restart: unless-stopped
        entrypoint:
          - /app/log
-         - -spaces-endpoint=https://nyc3.digitaloceanspaces.com
-         - -spaces-region=nyc3
-         - -spaces-bucket=unionpots-log
-         - -spaces-key=<key>
-         - -spaces-secret=<secret>
+         - -backup-config=/config/backups.yml
        command:
          - serve
          # Compose interpolates $, so every $ in the bcrypt hash is doubled.
          - -password-hash=$$2a$$10$$...
        volumes:
          - ./data:/data
+         - ./backups.yml:/config/backups.yml:ro
        ports:
          - "127.0.0.1:8081:8080"
        stop_grace_period: 45s   # time for the final backup on shutdown

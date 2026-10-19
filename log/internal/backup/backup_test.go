@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,9 +28,15 @@ func setup(t *testing.T) (*Backuper, *db.Store, DirStore) {
 	}
 	store := DirStore{Root: t.TempDir()}
 	clock := time.Date(2026, 10, 3, 14, 0, 0, 0, time.UTC)
+	var clockMu sync.Mutex // targets are backed up concurrently
 	b := &Backuper{
-		DB: sqlDB, Store: store, DataDir: dataDir,
-		Now: func() time.Time { clock = clock.Add(time.Hour); return clock },
+		DB: sqlDB, Targets: []Target{{"main", store}}, DataDir: dataDir,
+		Now: func() time.Time {
+			clockMu.Lock()
+			defer clockMu.Unlock()
+			clock = clock.Add(time.Hour)
+			return clock
+		},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if _, err := sqlDB.Exec("UPDATE id_sequence SET next_piece_id = 120"); err != nil { // tests number from #120
@@ -62,7 +69,7 @@ func TestSkipsUnchangedAndUploadsChanges(t *testing.T) {
 	if len(snaps) != 3 {
 		t.Fatalf("snapshots = %v, want 3", snaps)
 	}
-	if st := b.Status(); st.LastError != "" || st.LastOK.IsZero() {
+	if st := b.Status().Targets[0]; st.LastError != "" || st.LastOK.IsZero() || st.Location != store.String() {
 		t.Fatalf("status = %+v", st)
 	}
 }
@@ -82,11 +89,11 @@ func TestRestoreRoundTrip(t *testing.T) {
 
 	dest := t.TempDir()
 	dbPath := filepath.Join(dest, "log.db")
-	key, err := Restore(ctx, store, dbPath, filepath.Join(dest, "photos"), RestoreOptions{}, b.Log)
+	target, key, err := Restore(ctx, b.Targets, dbPath, filepath.Join(dest, "photos"), RestoreOptions{}, b.Log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(key, snapshotPrefix) {
+	if target != "main" || !strings.HasPrefix(key, snapshotPrefix) {
 		t.Errorf("restored %s, want the newest snapshot", key)
 	}
 
@@ -104,36 +111,48 @@ func TestRestoreRoundTrip(t *testing.T) {
 	}
 
 	// Refuses to overwrite an existing database.
-	if _, err := Restore(ctx, store, dbPath, filepath.Join(dest, "photos"), RestoreOptions{}, b.Log); err == nil {
+	if _, _, err := Restore(ctx, b.Targets, dbPath, filepath.Join(dest, "photos"), RestoreOptions{}, b.Log); err == nil {
 		t.Fatal("expected error restoring over existing database")
 	}
 }
 
 func TestChooseSnapshot(t *testing.T) {
-	store := DirStore{Root: t.TempDir()}
-	ctx := context.Background()
-	for _, k := range []string{
-		"db/snapshots/2026-09-30T23-00-00Z.db.gz",
-		"db/snapshots/2026-10-01T09-00-00Z.db.gz",
-		"db/snapshots/2026-10-02T09-00-00Z.db.gz",
-		"db/pre-migration/2026-10-03T09-00-00Z-v4.db.gz", // newest, but never chosen by default
-		"db/hourly/2026-10-05T09-00-00Z.db.gz",           // not a current layout: ignored
-	} {
-		store.Put(ctx, k, []byte("x"))
+	listings := [][]string{
+		{
+			"db/snapshots/2026-09-30T23-00-00Z.db.gz",
+			"db/snapshots/2026-10-02T09-00-00Z.db.gz",
+			"db/pre-migration/2026-10-03T09-00-00Z-v4.db.gz", // newest, but never chosen by default
+			"db/hourly/2026-10-05T09-00-00Z.db.gz",           // not a current layout: ignored
+			"photos/originals/ab/abc.jpg",
+		},
+		{
+			"db/snapshots/2026-10-01T09-00-00Z.db.gz",
+			"db/snapshots/2026-10-02T09-00-00Z.db.gz", // a tie goes to the first target
+		},
 	}
-	cases := map[string]string{
-		"":           "db/snapshots/2026-10-02T09-00-00Z.db.gz",
-		"2026-10-01": "db/snapshots/2026-10-01T09-00-00Z.db.gz",
-		"2026-09-30": "db/snapshots/2026-09-30T23-00-00Z.db.gz",
+	cases := map[string]struct {
+		target int
+		key    string
+	}{
+		"":           {0, "db/snapshots/2026-10-02T09-00-00Z.db.gz"},
+		"2026-10-01": {1, "db/snapshots/2026-10-01T09-00-00Z.db.gz"},
+		"2026-09-30": {0, "db/snapshots/2026-09-30T23-00-00Z.db.gz"},
 	}
 	for at, want := range cases {
-		got, err := chooseSnapshot(ctx, store, RestoreOptions{At: at})
-		if err != nil || got != want {
-			t.Errorf("At=%q: got %q, %v; want %q", at, got, err, want)
+		i, got, err := chooseSnapshot(listings, RestoreOptions{At: at})
+		if err != nil || i != want.target || got != want.key {
+			t.Errorf("At=%q: got %d %q, %v; want %d %q", at, i, got, err, want.target, want.key)
 		}
 	}
-	if _, err := chooseSnapshot(ctx, store, RestoreOptions{At: "2026-01-01"}); err == nil {
+	if _, _, err := chooseSnapshot(listings, RestoreOptions{At: "2026-01-01"}); err == nil {
 		t.Errorf("expected error when nothing matches")
+	}
+	// An exact key, in any layout, from the target that has it.
+	if i, got, err := chooseSnapshot(listings, RestoreOptions{Key: "db/hourly/2026-10-05T09-00-00Z.db.gz"}); err != nil || i != 0 || got != "db/hourly/2026-10-05T09-00-00Z.db.gz" {
+		t.Errorf("by key: %d %q %v", i, got, err)
+	}
+	if _, _, err := chooseSnapshot(listings, RestoreOptions{Key: "db/snapshots/missing.db.gz"}); err == nil {
+		t.Errorf("expected error for a key no target holds")
 	}
 }
 
@@ -151,7 +170,7 @@ func TestPruneKeepsThirtyDaysAndAlwaysOne(t *testing.T) {
 	} {
 		store.Put(ctx, k, []byte("x"))
 	}
-	if err := b.prune(ctx); err != nil {
+	if err := b.prune(ctx, store); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := store.List(ctx, "db/")
@@ -162,7 +181,7 @@ func TestPruneKeepsThirtyDaysAndAlwaysOne(t *testing.T) {
 
 	// Months later, with no new backups, the newest copy is still kept.
 	now = now.AddDate(1, 0, 0)
-	if err := b.prune(ctx); err != nil {
+	if err := b.prune(ctx, store); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.List(ctx, snapshotPrefix); len(got) != 2 {
@@ -171,9 +190,8 @@ func TestPruneKeepsThirtyDaysAndAlwaysOne(t *testing.T) {
 
 	// If only an old pre-migration copy is left, it is kept too.
 	store2 := DirStore{Root: t.TempDir()}
-	b.Store = store2
 	store2.Put(ctx, "db/pre-migration/2020-01-01T00-00-00Z-v1.db.gz", []byte("x"))
-	b.prune(ctx)
+	b.prune(ctx, store2)
 	if got, _ := store2.List(ctx, "db/"); len(got) != 1 {
 		t.Fatalf("the only backup must never be deleted: %v", got)
 	}
@@ -187,10 +205,11 @@ func TestSnapshotsList(t *testing.T) {
 	store.Put(ctx, "db/pre-migration/2026-10-03T10-00-00Z-v4.db.gz", []byte("x"))
 	store.Put(ctx, "db/daily/2026-09-01.db.gz", []byte("x"))
 	store.Put(ctx, "photos/originals/ab/abc.jpg", []byte("x"))
-	snaps, err := b.Snapshots(ctx)
-	if err != nil {
-		t.Fatal(err)
+	stored := b.Stored(ctx)
+	if len(stored) != 1 || stored[0].Target != "main" || stored[0].Err != nil {
+		t.Fatalf("stored = %+v", stored)
 	}
+	snaps := stored[0].Snapshots
 	if len(snaps) != 3 || snaps[0].Key != "db/snapshots/2026-10-01T08-00-00Z.db.gz" || !snaps[1].PreMigration || snaps[2].At.Hour() != 10 {
 		t.Fatalf("snapshots = %+v", snaps)
 	}
@@ -228,7 +247,7 @@ func TestPreMigrationBackupIsSeparateAndNotRestoredByDefault(t *testing.T) {
 	if strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Fatalf("keys = %v\nwant %v", keys, want)
 	}
-	got, err := chooseSnapshot(ctx, store, RestoreOptions{})
+	_, got, err := chooseSnapshot([][]string{keys}, RestoreOptions{})
 	if err != nil || got != "db/snapshots/2026-10-04T01-00-00Z.db.gz" {
 		t.Fatalf("default restore chose %q, %v", got, err)
 	}
@@ -260,9 +279,9 @@ func TestPrefixedStoresStayApart(t *testing.T) {
 		t.Fatalf("demo read %q", b)
 	}
 	// Pruning prod's old snapshots leaves demo's alone.
-	bk := &Backuper{Store: prod, Now: func() time.Time { return time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC) },
+	bk := &Backuper{Now: func() time.Time { return time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC) },
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	if err := bk.prune(ctx); err != nil {
+	if err := bk.prune(ctx, prod); err != nil {
 		t.Fatal(err)
 	}
 	all, _ := bucket.List(ctx, "")

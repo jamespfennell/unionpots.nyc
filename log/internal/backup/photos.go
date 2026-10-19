@@ -8,11 +8,9 @@ import (
 	"unionpots.nyc/log/internal/photos"
 )
 
-// PhotoSource is the part of the database that tracks which photos still
-// need copying to backup storage.
+// PhotoSource lists the photos whose files are backed up.
 type PhotoSource interface {
-	PhotosNotBackedUp(ctx context.Context) ([]db.Photo, error)
-	MarkPhotoBackedUp(ctx context.Context, id int64) error
+	AllPhotos(ctx context.Context) ([]db.Photo, error)
 }
 
 // Kick asks the running backup loop to upload new photos now rather than at
@@ -24,48 +22,73 @@ func (b *Backuper) Kick() {
 	}
 }
 
-// SyncPhotos uploads the files of every photo not yet backed up.
+// SyncPhotos uploads to each target the photo files it is missing.
 func (b *Backuper) SyncPhotos(ctx context.Context) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.syncPhotos(ctx)
+	b.run.Lock()
+	defer b.run.Unlock()
+	return eachTarget(ctx, b.Targets, func(ctx context.Context, t Target) error {
+		if err := b.syncPhotos(ctx, t); err != nil {
+			err = fmt.Errorf("photo backup: %w", err)
+			b.recordError(t.Name, err)
+			return err
+		}
+		return nil
+	})
 }
 
-func (b *Backuper) syncPhotos(ctx context.Context) error {
+// syncPhotos compares the target's photo files with the photos in the
+// database and uploads the missing ones. Listing the target, rather than
+// remembering what was sent, means a new target, or one that was down or
+// lost files, catches up by itself.
+func (b *Backuper) syncPhotos(ctx context.Context, t Target) error {
 	if b.Photos == nil {
 		return nil
 	}
-	pending, err := b.Photos.PhotosNotBackedUp(ctx)
+	all, err := b.Photos.AllPhotos(ctx)
 	if err != nil {
 		return err
 	}
+	stored, err := t.Store.List(ctx, PhotoPrefix)
+	if err != nil {
+		return err
+	}
+	have := make(map[string]bool, len(stored))
+	for _, k := range stored {
+		have[k] = true
+	}
 	files := &photos.Store{Dir: b.PhotoDir}
-	for _, p := range pending {
+	for _, p := range all {
 		ph := photos.Photo{SHA256: p.SHA256, Ext: p.Ext}
+		uploaded := false
 		for _, rel := range ph.Paths() {
+			if have[PhotoPrefix+rel] {
+				continue
+			}
 			data, err := files.ReadFile(rel)
 			if err != nil {
 				return fmt.Errorf("photo %d: %w", p.ID, err)
 			}
-			if err := b.Store.Put(ctx, PhotoPrefix+rel, data); err != nil {
+			if err := t.Store.Put(ctx, PhotoPrefix+rel, data); err != nil {
 				return fmt.Errorf("photo %d: %w", p.ID, err)
 			}
+			uploaded = true
 		}
-		if err := b.Photos.MarkPhotoBackedUp(ctx, p.ID); err != nil {
-			return err
+		if uploaded {
+			b.Log.Info("photo backed up", "target", t.Name, "id", p.ID, "sha256", p.SHA256)
 		}
-		b.Log.Info("photo backed up", "id", p.ID, "sha256", p.SHA256)
 	}
 	return nil
 }
 
-// DeletePhoto removes a photo's files from backup storage (when it has been
-// removed from a piece).
+// DeletePhoto removes a photo's files from every target (when it has been
+// removed from a piece). A target that can't be reached keeps its copy.
 func (b *Backuper) DeletePhoto(ctx context.Context, p photos.Photo) error {
-	for _, rel := range p.Paths() {
-		if err := b.Store.Delete(ctx, PhotoPrefix+rel); err != nil {
-			return err
+	return eachTarget(ctx, b.Targets, func(ctx context.Context, t Target) error {
+		for _, rel := range p.Paths() {
+			if err := t.Store.Delete(ctx, PhotoPrefix+rel); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }

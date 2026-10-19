@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+
+	"github.com/goccy/go-yaml"
 
 	"unionpots.nyc/log/internal/backup"
 )
@@ -19,21 +22,25 @@ import (
 // (`log -data-dir … serve`, handy in a compose entrypoint so `restore` gets
 // them too) and after it (`log serve -data-dir …`).
 type storage struct {
-	DataDir   string
-	Spaces    backup.S3Config
-	Prefix    string
-	BackupDir string
+	DataDir      string
+	BackupConfig string
+	BackupDir    string
+	// Deprecated: a single bucket, from before -backup-config.
+	Spaces backup.S3Config
+	Prefix string
 }
 
 func (s *storage) addFlags(fs *flag.FlagSet) {
 	fs.StringVar(&s.DataDir, "data-dir", s.DataDir, "directory holding log.db and photos/")
-	fs.StringVar(&s.Spaces.Endpoint, "spaces-endpoint", s.Spaces.Endpoint, "backup storage endpoint, e.g. https://nyc3.digitaloceanspaces.com")
-	fs.StringVar(&s.Spaces.Region, "spaces-region", s.Spaces.Region, "backup storage region, e.g. nyc3")
-	fs.StringVar(&s.Spaces.Bucket, "spaces-bucket", s.Spaces.Bucket, "backup bucket")
-	fs.StringVar(&s.Spaces.KeyID, "spaces-key", s.Spaces.KeyID, "backup storage access key")
-	fs.StringVar(&s.Spaces.SecretKey, "spaces-secret", s.Spaces.SecretKey, "backup storage secret key")
-	fs.StringVar(&s.Prefix, "backup-prefix", s.Prefix, "folder inside the bucket for this deployment, e.g. prod")
+	fs.StringVar(&s.BackupConfig, "backup-config", s.BackupConfig, "YAML file listing the buckets to back up to (see README.md)")
 	fs.StringVar(&s.BackupDir, "backup-dir", s.BackupDir, "back up to this local directory instead of a bucket (testing)")
+	const old = " (deprecated: use -backup-config)"
+	fs.StringVar(&s.Spaces.Endpoint, "spaces-endpoint", s.Spaces.Endpoint, "backup storage endpoint"+old)
+	fs.StringVar(&s.Spaces.Region, "spaces-region", s.Spaces.Region, "backup storage region"+old)
+	fs.StringVar(&s.Spaces.Bucket, "spaces-bucket", s.Spaces.Bucket, "backup bucket"+old)
+	fs.StringVar(&s.Spaces.KeyID, "spaces-key", s.Spaces.KeyID, "backup storage access key"+old)
+	fs.StringVar(&s.Spaces.SecretKey, "spaces-secret", s.Spaces.SecretKey, "backup storage secret key"+old)
+	fs.StringVar(&s.Prefix, "backup-prefix", s.Prefix, "folder inside the bucket for this deployment"+old)
 }
 
 func (s storage) dbPath() string   { return filepath.Join(s.DataDir, "log.db") }
@@ -42,14 +49,24 @@ func (s storage) photoDir() string { return filepath.Join(s.DataDir, "photos") }
 // anyBackupFlag reports whether any backup setting was given.
 func (s storage) anyBackupFlag() bool {
 	sp := s.Spaces
-	return s.BackupDir != "" || s.Prefix != "" ||
+	return s.BackupConfig != "" || s.BackupDir != "" || s.Prefix != "" ||
 		sp.Endpoint != "" || sp.Region != "" || sp.Bucket != "" || sp.KeyID != "" || sp.SecretKey != ""
 }
 
-// store returns the backup storage, or nil if backups aren't configured.
-// problem explains configuration that is incomplete or contradictory (the
-// store is then nil too).
-func (s storage) store() (store backup.ObjectStore, problem string) {
+// targets returns where backups go, or none if backups aren't configured.
+// problem explains configuration that is incomplete or contradictory (there
+// are then no targets either).
+func (s storage) targets() (targets []backup.Target, problem string) {
+	if s.BackupConfig != "" {
+		if s.BackupDir != "" || s.Prefix != "" || s.Spaces != (backup.S3Config{}) {
+			return nil, "-backup-config can't be combined with -backup-dir, -backup-prefix or -spaces-*"
+		}
+		targets, err := loadBackupConfig(s.BackupConfig)
+		if err != nil {
+			return nil, err.Error()
+		}
+		return targets, ""
+	}
 	sp := s.Spaces
 	var missing []string
 	for _, f := range []struct{ name, v string }{
@@ -61,34 +78,129 @@ func (s storage) store() (store backup.ObjectStore, problem string) {
 		}
 	}
 	anySpaces := len(missing) < 5
+	var t backup.Target
 	switch {
 	case s.BackupDir != "" && anySpaces:
 		return nil, "both -backup-dir and -spaces-* are set; use one"
 	case s.BackupDir != "":
-		store = backup.DirStore{Root: s.BackupDir}
+		t = backup.Target{Name: "local", Store: backup.DirStore{Root: s.BackupDir}}
 	case anySpaces && len(missing) > 0:
 		return nil, "missing " + strings.Join(missing, ", ")
 	case anySpaces:
-		store = backup.NewS3Store(sp)
+		t = backup.Target{Name: "spaces", Store: backup.NewS3Store(sp)}
 	case s.Prefix != "":
 		return nil, "-backup-prefix is set but no bucket is configured"
 	default:
 		return nil, ""
 	}
 	// Several deployments (e.g. the log and a demo) can share a bucket.
-	return backup.Prefixed(store, s.Prefix), ""
+	t.Store = backup.Prefixed(t.Store, s.Prefix)
+	return []backup.Target{t}, ""
 }
 
-// requireStore is for commands that can't do anything without backups.
-func (s storage) requireStore() (backup.ObjectStore, error) {
-	store, problem := s.store()
+// requireTargets is for commands that can't do anything without backups.
+func (s storage) requireTargets() ([]backup.Target, error) {
+	targets, problem := s.targets()
 	if problem != "" {
 		return nil, errors.New("backups are misconfigured: " + problem)
 	}
-	if store == nil {
-		return nil, errors.New("no backup storage configured: set -spaces-endpoint, -spaces-region, -spaces-bucket, -spaces-key and -spaces-secret (or -backup-dir)")
+	if len(targets) == 0 {
+		return nil, errors.New("no backup storage configured: set -backup-config (or -backup-dir)")
 	}
-	return store, nil
+	return targets, nil
+}
+
+// backupConfig is the -backup-config file: every place backups go. Each
+// target is either a bucket (endpoint, region, bucket, key and secret) or a
+// local directory (dir).
+type backupConfig struct {
+	Targets []targetConfig `yaml:"targets"`
+}
+
+type targetConfig struct {
+	Name     text `yaml:"name"`
+	Endpoint text `yaml:"endpoint"`
+	Region   text `yaml:"region"`
+	Bucket   text `yaml:"bucket"`
+	Key      text `yaml:"key"`
+	Secret   text `yaml:"secret"`
+	Dir      text `yaml:"dir"`
+	// Prefix is the folder inside the bucket for this deployment, so
+	// several deployments can share a bucket.
+	Prefix text `yaml:"prefix"`
+}
+
+// text is a config value that must be a YAML string. Unquoted, YAML reads
+// some values as other types (012345 as the number 5349, true as a bool),
+// which for a key or secret would silently be the wrong value.
+type text string
+
+func (t *text) UnmarshalYAML(raw []byte) error {
+	var v any
+	if err := yaml.Unmarshal(raw, &v); err != nil {
+		return err
+	}
+	switch v := v.(type) {
+	case string:
+		*t = text(v)
+	case nil:
+		*t = ""
+	default:
+		return fmt.Errorf("put %s in quotes: unquoted, YAML reads it as %v, not text", strings.TrimSpace(string(raw)), v)
+	}
+	return nil
+}
+
+var targetName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+func loadBackupConfig(path string) ([]backup.Target, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading -backup-config: %w", err)
+	}
+	var c backupConfig
+	if err := yaml.UnmarshalWithOptions(data, &c, yaml.Strict()); err != nil {
+		return nil, fmt.Errorf("%s: %s", path, yaml.FormatError(err, false, false))
+	}
+	if len(c.Targets) == 0 {
+		return nil, fmt.Errorf("%s: no targets", path)
+	}
+	var targets []backup.Target
+	seen := map[string]bool{}
+	for i, tc := range c.Targets {
+		if !targetName.MatchString(string(tc.Name)) {
+			return nil, fmt.Errorf("%s: target %d: name %q must be lower-case letters, digits and dashes", path, i+1, tc.Name)
+		}
+		if seen[string(tc.Name)] {
+			return nil, fmt.Errorf("%s: two targets are named %q", path, tc.Name)
+		}
+		seen[string(tc.Name)] = true
+		var missing []string
+		for _, f := range []struct {
+			name string
+			v    text
+		}{
+			{"endpoint", tc.Endpoint}, {"region", tc.Region}, {"bucket", tc.Bucket}, {"key", tc.Key}, {"secret", tc.Secret},
+		} {
+			if f.v == "" {
+				missing = append(missing, f.name)
+			}
+		}
+		var store backup.ObjectStore
+		switch {
+		case tc.Dir != "" && len(missing) < 5:
+			return nil, fmt.Errorf("%s: target %q: set either dir or a bucket, not both", path, tc.Name)
+		case tc.Dir != "":
+			store = backup.DirStore{Root: string(tc.Dir)}
+		case len(missing) > 0:
+			return nil, fmt.Errorf("%s: target %q: missing %s", path, tc.Name, strings.Join(missing, ", "))
+		default:
+			store = backup.NewS3Store(backup.S3Config{Endpoint: string(tc.Endpoint), Region: string(tc.Region),
+				Bucket: string(tc.Bucket), KeyID: string(tc.Key), SecretKey: string(tc.Secret)})
+		}
+		targets = append(targets, backup.Target{Name: string(tc.Name), Store: backup.Prefixed(store, string(tc.Prefix))})
+	}
+	return targets, nil
 }
 
 const sessionSecretFile = "session-secret"

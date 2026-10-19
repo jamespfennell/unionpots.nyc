@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Restore log.unionpots.nyc from its backups in Spaces. See restore_playbook.md.
+# Restore log.unionpots.nyc from its backup buckets. See restore_playbook.md.
 #
 # Run from the directory containing the compose file.
-#   ./restore.sh                      newest snapshot
+#   ./restore.sh                      newest snapshot in any bucket
 #   ./restore.sh -at 2026-10-01       newest snapshot on or before a date
 #   ./restore.sh -key db/snapshots/2026-10-03T14-00-00Z.db.gz
+#   ./restore.sh -from r2             only look in one bucket
 set -euo pipefail
 
 SERVICE=log.unionpots.nyc

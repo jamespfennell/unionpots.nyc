@@ -2,7 +2,7 @@
 //
 //	log serve          run the web app
 //	log backup         snapshot the database to backup storage now
-//	log restore        restore the database and photos from backup storage
+//	log restore        restore the database and photos from a backup target
 //	log hash-password  print a bcrypt hash for -password-hash
 //
 // Run `log <command> -h` for its flags. The data directory and backup flags
@@ -127,13 +127,13 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 	if err != nil {
 		return err
 	}
-	store, problem := o.store()
+	targets, problem := o.targets()
 	switch {
 	case o.Demo:
 		logger.Info("DEMO MODE: sample data, reset hourly; no backups")
 	case problem != "":
 		logger.Warn("BACKUPS ARE MISCONFIGURED, running without them", "problem", problem)
-	case store == nil:
+	case len(targets) == 0:
 		logger.Warn("BACKUPS ARE DISABLED: no backup storage configured")
 	}
 	defaultPassword := o.PasswordHash == ""
@@ -160,21 +160,28 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 	}
 	_, statErr := os.Stat(o.dbPath())
 	dbExists := statErr == nil
-	if store != nil && !o.AllowEmptyDB {
-		// Make sure backup storage works. If it doesn't, carry on with a
-		// warning, unless the database is missing: that's when backups
-		// matter most, and starting an empty log would make its (empty)
-		// snapshots the newest ones.
-		checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		has, err := backup.HasBackups(checkCtx, store)
-		cancel()
-		switch {
-		case err != nil && !dbExists:
-			return fmt.Errorf("%s does not exist and backup storage can't be checked for existing backups (%v): fix the backup flags, or pass -allow-empty-db to start an empty log", o.dbPath(), err)
-		case err != nil:
-			logger.Warn("backup storage isn't working; will keep retrying", "err", err)
-		case has && !dbExists:
-			return fmt.Errorf("%s does not exist but backups exist in %s: run `log restore`, or pass -allow-empty-db to start an empty log", o.dbPath(), store)
+	if problem != "" && !dbExists && !o.AllowEmptyDB {
+		// Once the configuration is fixed, an empty log's snapshots would
+		// become the newest ones.
+		return fmt.Errorf("%s does not exist and backups are misconfigured (%s), so existing backups can't be checked: fix the backup configuration, or pass -allow-empty-db to start an empty log", o.dbPath(), problem)
+	}
+	if !o.AllowEmptyDB {
+		for _, t := range targets {
+			// Make sure backup storage works. If it doesn't, carry on with a
+			// warning, unless the database is missing: that's when backups
+			// matter most, and starting an empty log would make its (empty)
+			// snapshots the newest ones.
+			checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			has, err := backup.HasBackups(checkCtx, t.Store)
+			cancel()
+			switch {
+			case err != nil && !dbExists:
+				return fmt.Errorf("%s does not exist and backup target %s can't be checked for existing backups (%v): fix the backup configuration, or pass -allow-empty-db to start an empty log", o.dbPath(), t.Name, err)
+			case err != nil:
+				logger.Warn("backup storage isn't working; will keep retrying", "target", t.Name, "err", err)
+			case has && !dbExists:
+				return fmt.Errorf("%s does not exist but backups exist in %s: run `log restore`, or pass -allow-empty-db to start an empty log", o.dbPath(), t.Store)
+			}
 		}
 	}
 
@@ -185,8 +192,8 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 	defer sqlDB.Close()
 
 	var backuper *backup.Backuper
-	if store != nil {
-		backuper = &backup.Backuper{DB: sqlDB, Store: store, DataDir: o.DataDir, Now: time.Now, Log: logger,
+	if len(targets) > 0 {
+		backuper = &backup.Backuper{DB: sqlDB, Targets: targets, DataDir: o.DataDir, Now: time.Now, Log: logger,
 			Photos: &db.Store{DB: sqlDB}, PhotoDir: o.photoDir()}
 	}
 	version, err := db.Version(ctx, sqlDB)
@@ -216,12 +223,12 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 	defer stopBackups()
 	backupsDone := make(chan struct{})
 	status := func() backup.Status { return backup.Status{Problem: problem} }
-	var snapshots func(context.Context) ([]backup.Snapshot, error)
+	var stored func(context.Context) []backup.Stored
 	var photoBackup web.PhotoBackup
 	switch {
 	case backuper != nil:
 		status = backuper.Status
-		snapshots = backuper.Snapshots
+		stored = backuper.Stored
 		photoBackup = backuper
 		go func() {
 			defer close(backupsDone)
@@ -255,7 +262,7 @@ func serve(logger *slog.Logger, st storage, args []string) error {
 		Auth: &web.Auth{PasswordHash: []byte(o.PasswordHash), Secret: key, Now: time.Now,
 			Rotate: func() ([]byte, error) { return rotateSessionKey(o.DataDir, []byte(o.PasswordHash)) }},
 		Backup:          status,
-		Snapshots:       snapshots,
+		Stored:          stored,
 		Photos:          files,
 		PhotoBackup:     photoBackup,
 		DefaultPassword: defaultPassword && !o.Demo,
@@ -310,7 +317,7 @@ func backupNow(logger *slog.Logger, st storage, args []string) error {
 	fs := flag.NewFlagSet("backup", flag.ExitOnError)
 	st.addFlags(fs)
 	fs.Parse(args)
-	store, err := st.requireStore()
+	targets, err := st.requireTargets()
 	if err != nil {
 		return err
 	}
@@ -322,7 +329,7 @@ func backupNow(logger *slog.Logger, st storage, args []string) error {
 		return err
 	}
 	defer sqlDB.Close()
-	b := &backup.Backuper{DB: sqlDB, Store: store, DataDir: st.DataDir, Now: time.Now, Log: logger,
+	b := &backup.Backuper{DB: sqlDB, Targets: targets, DataDir: st.DataDir, Now: time.Now, Log: logger,
 		Photos: &db.Store{DB: sqlDB}, PhotoDir: st.photoDir()}
 	uploaded, err := b.RunOnce(context.Background(), false)
 	if err != nil {
@@ -339,18 +346,37 @@ func restore(logger *slog.Logger, st storage, args []string) error {
 	st.addFlags(fs)
 	at := fs.String("at", "", "restore the newest snapshot taken on or before this date (YYYY-MM-DD)")
 	key := fs.String("key", "", "restore this exact snapshot key, e.g. db/snapshots/2026-10-03T14-00-00Z.db.gz")
+	from := fs.String("from", "", "restore only from the backup target with this name (default: the newest snapshot in any target)")
 	fs.Parse(args)
-	store, err := st.requireStore()
+	targets, err := st.requireTargets()
 	if err != nil {
 		return err
 	}
-	restored, err := backup.Restore(context.Background(), store, st.dbPath(), st.photoDir(),
+	if targets, err = pickTargets(targets, *from); err != nil {
+		return err
+	}
+	target, restored, err := backup.Restore(context.Background(), targets, st.dbPath(), st.photoDir(),
 		backup.RestoreOptions{Key: *key, At: *at}, logger)
 	if err != nil {
 		return err
 	}
-	logger.Info("restore complete", "snapshot", restored, "db", st.dbPath())
+	logger.Info("restore complete", "target", target, "snapshot", restored, "db", st.dbPath())
 	return nil
+}
+
+// pickTargets narrows the targets to the named one; "" means all of them.
+func pickTargets(targets []backup.Target, name string) ([]backup.Target, error) {
+	if name == "" {
+		return targets, nil
+	}
+	var names []string
+	for _, t := range targets {
+		if t.Name == name {
+			return []backup.Target{t}, nil
+		}
+		names = append(names, t.Name)
+	}
+	return nil, fmt.Errorf("no backup target named %q (have %s)", name, strings.Join(names, ", "))
 }
 
 func hashPassword() error {
