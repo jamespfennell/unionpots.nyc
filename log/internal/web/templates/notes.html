@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1>Notes</h1>
+
+<section>
+  {{if .Notes}}
+  <div class="rows">
+    {{range .Notes}}
+    <a class="row row-two" href="/notes/{{.ID}}">
+      <span class="row-main">{{.Title}}</span>
+      <span class="row-end">edited {{ago .Updated $.Now}}</span>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="empty">No notes yet.</p>
+  {{end}}
+</section>
+
+<section>
+  <h2>New note</h2>
+  <form method="post" action="/notes" class="stack">
+    <label class="field">Title <input name="title" required autocomplete="off" placeholder="e.g. Glaze mixing ratios"></label>
+    <button class="button" type="submit">Add</button>
+  </form>
+</section>
+{{end}}

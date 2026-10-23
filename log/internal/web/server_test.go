@@ -1623,3 +1623,34 @@ func TestStepDates(t *testing.T) {
 		t.Errorf("thrown = %s", ev[0].Date)
 	}
 }
+
+func TestNotes(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	if !strings.Contains(a.do("GET", "/", nil).Body.String(), `<a href="/notes">Notes</a>`) {
+		t.Errorf("menu should link to Notes")
+	}
+	if rec := a.do("POST", "/notes", url.Values{"title": {" "}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("a note needs a title: %d", rec.Code)
+	}
+	rec := a.do("POST", "/notes", url.Values{"title": {"Kiln schedule"}})
+	ns, _ := a.store.Notes(ctx)
+	if len(ns) != 1 || rec.Header().Get("Location") != fmt.Sprintf("/notes/%d", ns[0].ID) {
+		t.Fatalf("adding opens the note: %v %+v", rec.Header(), ns)
+	}
+	a.do("POST", "/notes", url.Values{"title": {"Glaze ratios"}})
+	id := ns[0].ID
+	a.do("POST", fmt.Sprintf("/notes/%d", id), url.Values{"title": {"Kiln schedule"}, "text": {"bisque on <Mondays>"}})
+	page := a.do("GET", "/notes", nil).Body.String()
+	if i, j := strings.Index(page, "Kiln schedule"), strings.Index(page, "Glaze ratios"); i < 0 || j < i || !strings.Contains(page, "edited just now") {
+		t.Errorf("the most recently edited note comes first:\n%s", page)
+	}
+	if page := a.do("GET", fmt.Sprintf("/notes/%d", id), nil).Body.String(); !strings.Contains(page, "bisque on &lt;Mondays&gt;</textarea>") {
+		t.Errorf("note page:\n%s", page)
+	}
+	a.do("POST", fmt.Sprintf("/notes/%d/delete", id), nil)
+	if rec := a.do("GET", fmt.Sprintf("/notes/%d", id), nil); rec.Code != http.StatusNotFound {
+		t.Errorf("deleted note: %d", rec.Code)
+	}
+}

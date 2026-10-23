@@ -420,3 +420,6 @@ details.disclosure.inline { margin-top: 0; }
 .step-date-field { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.25rem 1rem; flex: 1 1 100%; }
 .step-date-field input { width: 11rem; max-width: 100%; }
 .also-siblings { font-size: 0.875rem; color: var(--muted); }
+
+/* A note's text grows with what's written. */
+.note-text { min-height: 12rem; field-sizing: content; }
