@@ -15,3 +15,4 @@ f1515eb5ffcbea48d7e8b6e2d6c161c9  a started piece's next step defaults to built 
 aec512770780650b704ca71ef2775aea  "Glazes (public)" plus a private "Glaze commentary" box (edit page, glazing card, details; never public)
 12e1ccd0687d9f9218e1c489f590977f  step dates editable on the edit page, kept in order, with the same step of the project's other pieces by default
 913b3adffc396fb5baa72a04fd4bc59f  Notes section (menu → Notes, above Backups): titled notes, most recently edited first, add/edit/delete
+c59ff86cbc3f98ff021f3860da8c5d5d  Links page (menu → Links, under Notes): titled links to open in a new tab, by title, add/edit/delete

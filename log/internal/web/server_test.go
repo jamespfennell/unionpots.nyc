@@ -1654,3 +1654,32 @@ func TestNotes(t *testing.T) {
 		t.Errorf("deleted note: %d", rec.Code)
 	}
 }
+
+func TestLinks(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	if page := a.do("GET", "/", nil).Body.String(); !strings.Contains(page, `<a href="/notes">Notes</a>
+        <a href="/links">Links</a>`) {
+		t.Errorf("menu should link to Links, under Notes")
+	}
+	if rec := a.do("POST", "/links", url.Values{"title": {"Form"}, "url": {"javascript:alert(1)"}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("a link needs a web address: %d", rec.Code)
+	}
+	if rec := a.do("POST", "/links", url.Values{"title": {"Studio firing form"}, "url": {"example.com/firing"}}); rec.Header().Get("Location") != "/links" {
+		t.Fatalf("adding goes back to the links: %v", rec.Header())
+	}
+	ls, _ := a.store.Links(ctx)
+	page := a.do("GET", "/links", nil).Body.String()
+	if !strings.Contains(page, `href="https://example.com/firing" target="_blank"`) || !strings.Contains(page, "Studio firing form") {
+		t.Errorf("links page:\n%s", page)
+	}
+	a.do("POST", fmt.Sprintf("/links/%d", ls[0].ID), url.Values{"title": {"Firing form"}, "url": {"https://example.com/f"}})
+	if ls, _ := a.store.Links(ctx); ls[0].Title != "Firing form" || ls[0].URL != "https://example.com/f" {
+		t.Errorf("updated: %+v", ls)
+	}
+	a.do("POST", fmt.Sprintf("/links/%d/delete", ls[0].ID), nil)
+	if page := a.do("GET", "/links", nil).Body.String(); !strings.Contains(page, "No links yet.") {
+		t.Errorf("deleted:\n%s", page)
+	}
+}

@@ -1,0 +1,49 @@
+{{define "content"}}
+<h1>Links</h1>
+
+<section>
+  {{if .Links}}
+  <div class="rows">
+    {{range .Links}}
+    <a class="row row-two" href="{{.URL}}" target="_blank" rel="noopener">
+      <span class="row-main">{{.Title}}</span>
+      <span class="row-end">{{.Host}}</span>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="empty">No links yet.</p>
+  {{end}}
+</section>
+
+{{if .Links}}
+<details class="disclosure">
+  <summary>Edit links</summary>
+  <p class="hint">Changes save as you type.</p>
+  {{range .Links}}
+  <section>
+    <form method="post" action="/links/{{.ID}}" class="stack" data-autosave
+          hx-post="/links/{{.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+      <input type="hidden" name="autosave" value="1">
+      <label class="field">Title <span class="save-status" data-save-status aria-live="polite"></span>
+        <input name="title" value="{{.Title}}" required autocomplete="off">
+      </label>
+      <label class="field">URL <input name="url" value="{{.URL}}" required autocomplete="off" inputmode="url"></label>
+    </form>
+    <form method="post" action="/links/{{.ID}}/delete" hx-confirm="Delete this link?">
+      <button class="link-button danger" type="submit">Delete</button>
+    </form>
+  </section>
+  {{end}}
+</details>
+{{end}}
+
+<section>
+  <h2>New link</h2>
+  <form method="post" action="/links" class="stack">
+    <label class="field">Title <input name="title" required autocomplete="off" placeholder="e.g. Studio firing form"></label>
+    <label class="field">URL <input name="url" required autocomplete="off" inputmode="url" placeholder="e.g. example.com/firing"></label>
+    <button class="button" type="submit">Add</button>
+  </form>
+</section>
+{{end}}
