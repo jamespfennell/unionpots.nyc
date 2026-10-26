@@ -23,9 +23,11 @@ and may be ticked **simple**.
      `<hash>  <short note on what was done>`.
    - Run `go vet ./... && go test ./...` before each commit; don't commit an
      idea whose tests fail.
-   - If a "simple" idea turns out not to be simple (unclear, risky, needs a
-     migration or a design decision), don't build it: treat it as one of
-     the other ideas below and say why.
+   - "Simple" is about the product behaviour, not the implementation: an
+     idea whose behaviour is clear is simple even if it needs a migration,
+     a new table or a new page. Only if the behaviour itself turns out to
+     be unclear or needs a product decision, don't build it: treat it as
+     one of the other ideas below and say why.
    - Push `main` when they're done (the push deploys automatically), then
      list what was implemented, one line each.
 
