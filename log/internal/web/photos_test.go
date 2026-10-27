@@ -127,3 +127,57 @@ func TestPhotoUploadServeAndRemove(t *testing.T) {
 		t.Fatalf("backup copy not deleted: %v", fb.deleted)
 	}
 }
+
+func TestPhotoViewer(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	ctx := context.Background()
+	if _, err := a.store.CreatePieces(ctx, db.NewPieces{Count: 2, Action: "thrown", Date: "2026-10-01"}); err != nil {
+		t.Fatal(err)
+	}
+	a.upload("/pieces/120/photos", true, map[string][]byte{"a.jpg": jpegBytes(t, 40, 30)})
+	a.upload("/pieces/120/photos", true, map[string][]byte{"b.jpg": jpegBytes(t, 30, 40)})
+	a.upload("/pieces/121/photos", true, map[string][]byte{"c.jpg": jpegBytes(t, 20, 20)})
+	ps, _ := a.store.PiecePhotos(ctx, 120)
+	other, _ := a.store.PiecePhotos(ctx, 121)
+
+	// Thumbnails open the viewer.
+	first := fmt.Sprintf("/pieces/120/photos/%d", ps[0].ID)
+	second := fmt.Sprintf("/pieces/120/photos/%d", ps[1].ID)
+	if page := a.do("GET", "/pieces/120", nil).Body.String(); !strings.Contains(page, `<a href="`+first+`"><img`) {
+		t.Fatalf("thumbnail should link to the viewer:\n%s", page)
+	}
+
+	// The first photo: the large copy, 1 of 2, a next arrow but no previous,
+	// and Share as a download link to the same file.
+	page := a.do("GET", first, nil).Body.String()
+	for _, want := range []string{
+		`<img src="/photos/` + ps[0].SHA256 + `_1600.jpg"`, "1 of 2",
+		`href="` + second + `" hx-boost="false" data-viewer-next`,
+		`href="/photos/` + ps[0].SHA256 + `_1600.jpg" download="union-pots-120-1.jpg"`,
+		`href="/pieces/120#photos" data-back`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("viewer should have %s:\n%s", want, page)
+		}
+	}
+	if strings.Contains(page, "data-viewer-prev") {
+		t.Errorf("the first photo has no previous one")
+	}
+	if page := a.do("GET", second, nil).Body.String(); !strings.Contains(page, "2 of 2") || !strings.Contains(page, `href="`+first+`" hx-boost="false" data-viewer-prev`) || strings.Contains(page, "data-viewer-next") {
+		t.Errorf("second photo:\n%s", page)
+	}
+
+	// A piece's only photo: no count, a plain file name.
+	page = a.do("GET", fmt.Sprintf("/pieces/121/photos/%d", other[0].ID), nil).Body.String()
+	if strings.Contains(page, " of 1") || !strings.Contains(page, `download="union-pots-121.jpg"`) {
+		t.Errorf("single photo:\n%s", page)
+	}
+
+	// Another piece's photo, or a missing one, isn't found.
+	for _, path := range []string{fmt.Sprintf("/pieces/120/photos/%d", other[0].ID), "/pieces/120/photos/999", "/pieces/999/photos/1"} {
+		if rec := a.do("GET", path, nil); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: %d", path, rec.Code)
+		}
+	}
+}

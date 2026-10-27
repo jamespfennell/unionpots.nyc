@@ -166,3 +166,48 @@ func (s *Server) photoFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	http.ServeFile(w, r, path)
 }
+
+// photoViewer shows one of a piece's photos full screen, with the piece's
+// other photos either side and a Share button that sends the photo itself.
+func (s *Server) photoViewer(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	photoID, err := pathID(r, "pid")
+	if err != nil {
+		return err
+	}
+	p, err := s.Store.GetPiece(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	ps, err := s.Store.PiecePhotos(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	at := -1
+	for i, ph := range ps {
+		if ph.ID == photoID {
+			at = i
+		}
+	}
+	if at < 0 {
+		return db.ErrNotFound
+	}
+	data := struct {
+		Page
+		Piece      db.Piece
+		Photo      db.Photo
+		Index      int // 1-based
+		Count      int
+		Prev, Next *db.Photo // nil at either end
+	}{Page: s.page(r, fmt.Sprintf("Photo of #%d", p.ID)), Piece: p, Photo: ps[at], Index: at + 1, Count: len(ps)}
+	if at > 0 {
+		data.Prev = &ps[at-1]
+	}
+	if at+1 < len(ps) {
+		data.Next = &ps[at+1]
+	}
+	return s.render(w, http.StatusOK, "photo", data)
+}

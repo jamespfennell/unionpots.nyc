@@ -98,6 +98,7 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("POST /glazes/{id}", s.handle(s.renameGlaze))
 	private.Handle("POST /glazes/{id}/delete", s.handle(s.deleteGlaze))
 	private.Handle("POST /pieces/{id}/photos", s.handle(s.addPhotos))
+	private.Handle("GET /pieces/{id}/photos/{pid}", s.handle(s.photoViewer))
 	private.Handle("POST /pieces/{id}/photos/{pid}/delete", s.handle(s.deletePhoto))
 	private.HandleFunc("GET /photos/{name}", s.photoFile)
 	private.Handle("GET /notes", s.handle(s.notes))

@@ -441,7 +441,59 @@
     });
   });
 
+  // --- Photo viewer -------------------------------------------------------
+  // Moving between photos (arrows, swipes, ← →) replaces the page in the
+  // history, so Back and ✕ (or Escape) go straight back to the piece.
+  function viewerGo(which) {
+    var link = document.querySelector("[data-viewer-" + which + "]");
+    if (link) location.replace(link.href);
+  }
+  document.addEventListener("click", function (e) {
+    var nav = e.target.closest && e.target.closest("[data-viewer-prev], [data-viewer-next]");
+    if (!nav) return;
+    e.preventDefault();
+    location.replace(nav.href);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (!document.querySelector("[data-viewer]") || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "ArrowLeft") viewerGo("prev");
+    else if (e.key === "ArrowRight") viewerGo("next");
+    else if (e.key === "Escape") document.querySelector("[data-viewer-close]").click();
+  });
+  var swipe = null;
+  document.addEventListener("touchstart", function (e) {
+    swipe = e.touches.length === 1 && e.target.closest && e.target.closest("[data-viewer-stage]")
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+  }, { passive: true });
+  document.addEventListener("touchend", function (e) {
+    if (!swipe) return;
+    var dx = e.changedTouches[0].clientX - swipe.x, dy = e.changedTouches[0].clientY - swipe.y;
+    swipe = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > 2 * Math.abs(dy)) viewerGo(dx < 0 ? "next" : "prev");
+  }, { passive: true });
+
+  // Share sends the photo file itself (to WhatsApp, Messages, …) through the
+  // system share sheet. The file is fetched when the viewer opens (it's the
+  // photo on screen, so it comes from the cache): browsers only allow
+  // sharing straight from the tap, not after waiting for a download. Where
+  // files can't be shared, the link downloads the photo instead.
+  function prepareShare(link) {
+    if (!navigator.canShare) return;
+    fetch(link.href).then(function (r) { return r.ok ? r.blob() : null; }).then(function (blob) {
+      if (!blob) return;
+      var file = new File([blob], link.getAttribute("download"), { type: "image/jpeg" });
+      if (navigator.canShare({ files: [file] })) link._file = file;
+    }).catch(function () {});
+  }
+  document.addEventListener("click", function (e) {
+    var link = e.target.closest && e.target.closest("[data-share-photo]");
+    if (!link || !link._file) return;
+    e.preventDefault();
+    navigator.share({ files: [link._file] }).catch(function () {});
+  });
+
   function init(root) {
+    root.querySelectorAll("[data-share-photo]").forEach(prepareShare);
     root.querySelectorAll("form").forEach(function (f) {
       if (f.querySelector("[data-show-for]")) syncChoice(f);
     });

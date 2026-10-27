@@ -19,3 +19,4 @@ c59ff86cbc3f98ff021f3860da8c5d5d  Links page (menu → Links, under Notes): titl
 1ddebee3fed527ffba47996bb3ec374c  queued for bisque: volume and firing fee at $0.04 and $0.06/cu in under the dimensions, with a total for several pieces; Firing calculators page (menu): a manually stacked stack, or measured pieces summed
 4bd3ad287c6549b2c8a08f960fe6493f  "Marked #n …" notice on the home page links to the piece, or the project when several were marked
 4121c67f5fe5cdb22c71b40af46ccace  Admin page (menu → Admin, under a line after Notes, Links and Firing calculators): Backups, App ideas, Log out (everywhere) and the version moved there
+8325f7a7cb7322f8041199337f73942f  photos open in an in-app viewer (full screen, swipe/arrows between a piece's photos); Share sends the photo file itself through the share sheet (WhatsApp, …), or downloads it
