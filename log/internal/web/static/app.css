@@ -146,6 +146,11 @@ h1 + .group { border-top: 0; }
 .row-project { grid-template-columns: 4.5rem 1fr auto; }
 .row-project .more { font-weight: 400; } /* black like the number, not bold */
 .row-two { grid-template-columns: 1fr auto; }
+/* Firing calculators: a checkbox before the number; the whole row toggles it. */
+.firing-row { grid-template-columns: auto 3rem 1fr auto; cursor: pointer; }
+.firing-row input { width: auto; min-height: 0; margin: 0; padding: 0; align-self: center; }
+.firing-row:has(input:disabled) { cursor: default; color: var(--muted); }
+.firing .bisque-price { margin-top: 0.75rem; }
 .pid { font-weight: 600; }
 /* A long name is cut short ("…"), never the date after it. */
 .row-main { min-width: 0; display: flex; align-items: baseline; white-space: nowrap; }
@@ -303,7 +308,10 @@ details.disclosure .hint { color: var(--muted); font-size: 0.875rem; margin: -0.
 .dims-label + .dims-inputs { margin-top: 0.25rem; }
 .dims-label { font-size: 0.875rem; }
 .dims-inputs input[inputmode] { text-align: center; }
-.dims-hint { font-size: 0.8rem; color: var(--muted); margin: 0; }
+.bisque-price {
+  display: flex; flex-direction: column; gap: 0.125rem;
+  font-size: 0.875rem; font-variant-numeric: tabular-nums; margin-top: -0.5rem;
+}
 .field-short input { max-width: 8rem; }
 .field-short input[type="date"] { max-width: 12rem; }
 details.disclosure.inline { margin-top: 0; }

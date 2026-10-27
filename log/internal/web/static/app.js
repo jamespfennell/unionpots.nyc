@@ -53,7 +53,80 @@
   }
 
   document.addEventListener("change", function (e) {
-    if (e.target.matches && e.target.matches('input[name="also"]')) syncAlsoCount(e.target.form);
+    if (e.target.matches && e.target.matches('input[name="also"]')) {
+      syncAlsoCount(e.target.form);
+      bisquePrice(e.target.form);
+    }
+  });
+
+  // A measurement as the server reads it (model.ParseMeasure): "4.5",
+  // "4 1/2" or "3/4". NaN if it isn't one.
+  function parseMeasure(s) {
+    var m = s.trim().match(/^(?:(\d+) +)?(\d+)\/(\d+)$/);
+    var v = m ? (m[1] ? +m[1] : 0) + m[2] / m[3] : /^(\d+\.?\d*|\.\d+)$/.test(s.trim()) ? +s.trim() : NaN;
+    return v > 0 && isFinite(v) ? v : NaN;
+  }
+
+  // The volume (height × width × depth) of a row of dimension inputs, by
+  // its key ("step" → h_step, w_step, d_step). NaN until all three are given.
+  function dimsVolume(form, key) {
+    return ["h", "w", "d"].reduce(function (v, k) {
+      return v * parseMeasure(form.querySelector('[name="' + k + "_" + key + '"]').value);
+    }, 1);
+  }
+
+  // Fills el with a heading line and the firing fee for vol cubic inches at
+  // each rate, one line (span) each.
+  function feeLines(el, first, vol) {
+    var rates = el.closest("[data-rates]").dataset.rates.split(" ").map(Number);
+    el.replaceChildren.apply(el, [first].concat(rates.map(function (r) {
+      return "$" + r.toFixed(2) + "/cu in: $" + (vol * r).toFixed(2);
+    })).map(function (t) {
+      var s = document.createElement("span");
+      s.textContent = t;
+      return s;
+    }));
+  }
+
+  function cubicInches(vol) { return Math.round(vol * 10) / 10 + " cu in"; }
+
+  // Queued for bisque: what firing costs for this piece; with others
+  // included, the total goes under the piece picker.
+  function bisquePrice(form) {
+    var out = form && form.querySelector("[data-bisque-price]");
+    if (!out) return;
+    var total = form.querySelector("[data-bisque-total]");
+    var vol = dimsVolume(form, "step");
+    var n = form.querySelectorAll('input[name="also"]:checked').length + 1;
+    out.hidden = isNaN(vol);
+    if (total) total.hidden = out.hidden || n === 1;
+    if (out.hidden) return;
+    feeLines(out, "Volume: " + cubicInches(vol) + ". Firing fee:", vol);
+    if (total && !total.hidden) feeLines(total, "Total firing fee:", n * vol);
+  }
+
+  // Firing calculators, two separate ways: a stack measured as a whole, or
+  // the ticked pieces, each at its queued size (just the fee: their total
+  // volume means nothing). Both show 0 until something is entered or ticked.
+  function firingCalc(form) {
+    if (!form || !form.matches("[data-firing]")) return;
+    var vol = dimsVolume(form, "stack");
+    if (isNaN(vol)) vol = 0;
+    feeLines(form.querySelector("[data-firing-stack]"), "Volume: " + cubicInches(vol) + ". Firing fee:", vol);
+    var pieces = form.querySelector("[data-firing-pieces]");
+    if (pieces) {
+      var ticked = form.querySelectorAll('input[name="piece"]:checked');
+      feeLines(pieces, "Firing fee for " + ticked.length + (ticked.length === 1 ? " piece:" : " pieces:"),
+        Array.prototype.reduce.call(ticked, function (v, c) { return v + Number(c.dataset.volume); }, 0));
+    }
+  }
+  document.addEventListener("change", function (e) {
+    if (e.target.matches && e.target.matches('input[name="piece"]')) firingCalc(e.target.form);
+  });
+  document.addEventListener("input", function (e) {
+    if (!(e.target.matches && e.target.matches('.dims input'))) return;
+    bisquePrice(e.target.form);
+    firingCalc(e.target.form);
   });
 
   // "How many pieces": typing a number selects "custom"; tapping 1–4 clears it.
@@ -375,6 +448,8 @@
     root.querySelectorAll("[data-glaze-entry]").forEach(glazePreview);
     root.querySelectorAll("form").forEach(function (f) {
       if (f.querySelector('input[name="also"]')) syncAlsoCount(f);
+      bisquePrice(f);
+      firingCalc(f);
     });
   }
 

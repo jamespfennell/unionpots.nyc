@@ -27,7 +27,7 @@
 {{/* Height / width / depth inputs (inches), one row per dimsRow. */}}
 {{define "dims"}}
 <div class="dims">
-  <div class="dims-head" aria-hidden="true"><span>Height</span><span>Width</span><span>Depth</span></div>
+  <div class="dims-head" aria-hidden="true"><span>Height (in)</span><span>Width (in)</span><span>Depth (in)</span></div>
   {{range .}}
   <div class="dims-row">
     {{with .Label}}<div class="dims-label">{{.}}</div>{{end}}
@@ -38,7 +38,6 @@
     </div>
   </div>
   {{end}}
-  <p class="dims-hint">Inches: 4.5 or 4 1/2.</p>
 </div>
 {{end}}
 

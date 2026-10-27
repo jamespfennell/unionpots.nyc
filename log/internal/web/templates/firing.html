@@ -1,0 +1,44 @@
+{{define "content"}}
+<h1>Firing calculators</h1>
+
+{{/* Two separate ways the studio charges: a stack built in the studio and
+     measured as a whole, or pieces measured one by one (the fee is the sum
+     of theirs). Nothing is submitted: the script works out the fees, which
+     are 0 until something is entered or ticked. */}}
+<form class="firing" data-firing data-rates="{{firingRates}}" hx-boost="false" onsubmit="return false">
+  <section>
+    <h2>Manually stacked</h2>
+    <p class="hint">Fee is based on the total size of the stack.</p>
+    {{template "dims" .Stack}}
+    <div class="bisque-price" data-firing-stack aria-live="polite"></div>
+  </section>
+
+  <section>
+    <h2>Measured pieces</h2>
+    <p class="hint">Each piece is fired at the size it was queued at; the fee is the sum.</p>
+    {{with .Studios}}
+    <nav class="studio-filter" aria-labelledby="studio-filter-label">
+      <span id="studio-filter-label" class="studio-filter-label">Studio</span>
+      <span class="segmented">
+        {{range .}}{{if eq $.Studio .ID}}<a href="/firing?studio=all" aria-current="true">{{.Name}}</a>{{else}}<a href="/firing?studio={{.ID}}">{{.Name}}</a>{{end}}{{end}}
+      </span>
+    </nav>
+    {{end}}
+    {{if .Pieces}}
+    <div class="rows">
+      {{range .Pieces}}
+      <label class="row firing-row">
+        <input type="checkbox" name="piece" value="{{.ID}}" data-volume="{{.Volume}}"{{if not .Volume}} disabled{{end}}>
+        <span class="pid">#{{.ID}}</span>
+        <span class="row-main">{{with .Label}}<span class="name">{{.}}</span>{{end}}</span>
+        <span class="row-end">{{if not .Volume}}not measured{{end}}</span>
+      </label>
+      {{end}}
+    </div>
+    <div class="bisque-price" data-firing-pieces aria-live="polite"></div>
+    {{else}}
+    <p class="empty">Nothing is waiting to be bisque fired.</p>
+    {{end}}
+  </section>
+</form>
+{{end}}

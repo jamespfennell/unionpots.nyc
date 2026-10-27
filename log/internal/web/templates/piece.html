@@ -39,9 +39,15 @@
       </div>
       {{else}}
       {{template "dims" .}}
+      {{if eq $p.State.Next "queued_bisque"}}
+      {{/* The volume and firing price at each rate, filled in by the script;
+           the total for several pieces goes under the piece picker. */}}
+      <div class="bisque-price" data-bisque-price data-rates="{{firingRates}}" aria-live="polite" hidden></div>
+      {{end}}
       {{end}}
     {{end}}
     {{template "alsoPieces" $}}
+    {{if and $.Siblings (eq $p.State.Next "queued_bisque")}}<div class="bisque-price" data-bisque-total data-rates="{{firingRates}}" aria-live="polite" hidden></div>{{end}}
   </div>
   {{end}}
   {{$verb := lower .Label}}

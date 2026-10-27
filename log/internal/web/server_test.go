@@ -1683,3 +1683,49 @@ func TestLinks(t *testing.T) {
 		t.Errorf("deleted:\n%s", page)
 	}
 }
+
+func TestFiringCalculator(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	if page := a.do("GET", "/", nil).Body.String(); !strings.Contains(page, `<a href="/links">Links</a>
+        <a href="/firing">Firing calculators</a>`) {
+		t.Errorf("menu should link to the firing calculators, under Links")
+	}
+	if page := a.do("GET", "/firing", nil).Body.String(); !strings.Contains(page, "Nothing is waiting to be bisque fired.") {
+		t.Errorf("empty calculator:\n%s", page)
+	}
+	// Two cups queued at 4 × 3.5 × 3.5 (49 cu in each), and a bowl queued
+	// without measuring it.
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}, "title": {"Cups"}})
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "title": {"Bowl"}})
+	for _, act := range []string{"trimmed", "queued_bisque"} {
+		a.do("POST", "/pieces/120/events", url.Values{"action": {act}, "also": {"121"},
+			"h_step": {"4"}, "w_step": {"3.5"}, "d_step": {"3.5"}})
+		a.do("POST", "/pieces/122/events", url.Values{"action": {act}})
+	}
+	page := a.do("GET", "/firing", nil).Body.String()
+	for _, want := range []string{
+		`value="120" data-volume="49">`, `value="121" data-volume="49">`,
+		`value="122" data-volume="0" disabled>`, "not measured",
+		`data-rates="0.04 0.06"`, `name="h_stack"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("calculator should have %s:\n%s", want, page)
+		}
+	}
+}
+
+func TestBisquePriceRates(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}, "title": {"Cups"}})
+	a.do("POST", "/pieces/120/events", url.Values{"action": {"trimmed"}, "also": {"121"}})
+	// The script reads the rates from each price line itself: the total
+	// sits under the piece picker, outside the per-piece line.
+	page := a.do("GET", "/pieces/120", nil).Body.String()
+	for _, want := range []string{`data-bisque-price data-rates="0.04 0.06"`, `data-bisque-total data-rates="0.04 0.06"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("piece page should have %s:\n%s", want, page)
+		}
+	}
+}

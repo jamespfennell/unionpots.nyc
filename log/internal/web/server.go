@@ -106,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("POST /notes/{id}", s.handle(s.updateNote))
 	private.Handle("POST /notes/{id}/delete", s.handle(s.deleteNote))
 	private.Handle("GET /links", s.handle(s.links))
+	private.Handle("GET /firing", s.handle(s.firing))
 	private.Handle("POST /links", s.handle(s.addLink))
 	private.Handle("POST /links/{id}", s.handle(s.updateLink))
 	private.Handle("POST /links/{id}/delete", s.handle(s.deleteLink))
@@ -193,12 +194,13 @@ func (s *Server) handle(f handlerFunc) http.Handler {
 // --- templates ---
 
 var funcs = template.FuncMap{
-	"static":  staticURL,
-	"lower":   strings.ToLower,
-	"daysAgo": daysAgo,
-	"measure": model.FormatMeasure,
-	"dimsNew": func() []dimsRow { return []dimsRow{{Key: "new"}} },
-	"hasID":   hasID,
+	"static":      staticURL,
+	"lower":       strings.ToLower,
+	"daysAgo":     daysAgo,
+	"measure":     model.FormatMeasure,
+	"dimsNew":     func() []dimsRow { return []dimsRow{{Key: "new"}} },
+	"hasID":       hasID,
+	"firingRates": func() string { return firingRates },
 	"json": func(v any) (string, error) {
 		b, err := json.Marshal(v)
 		return string(b), err
