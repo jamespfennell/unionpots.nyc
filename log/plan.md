@@ -353,7 +353,7 @@ log/
   it doesn't advertise the default) warns about it.
 - The cookie signing key comes from a random secret the app creates in
   `<data-dir>/session-secret` (not backed up) combined with the password
-  hash: "Log out everywhere" in the menu (which replaces the secret),
+  hash: "Log out everywhere" on the Admin page (which replaces the secret),
   deleting the file, or changing the password logs out every device.
 - Login sets an HMAC-signed session cookie (`HttpOnly; Secure;
   SameSite=Lax`, 1 year).

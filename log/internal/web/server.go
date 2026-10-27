@@ -107,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	private.Handle("POST /notes/{id}/delete", s.handle(s.deleteNote))
 	private.Handle("GET /links", s.handle(s.links))
 	private.Handle("GET /firing", s.handle(s.firing))
+	private.Handle("GET /admin", s.handle(s.admin))
 	private.Handle("POST /links", s.handle(s.addLink))
 	private.Handle("POST /links/{id}", s.handle(s.updateLink))
 	private.Handle("POST /links/{id}/delete", s.handle(s.deleteLink))

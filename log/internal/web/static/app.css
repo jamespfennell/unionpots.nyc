@@ -113,7 +113,6 @@ a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset:
 .menu-panel a:hover, .menu-panel button:hover { background: var(--hover); }
 .menu-panel form { margin: 0; }
 .menu-panel hr { border: 0; border-top: 1px solid var(--line); margin: 0; }
-.menu-version { margin: 0; padding: 0.6rem 1rem; border-top: 1px solid var(--line); font-size: 0.8rem; color: var(--muted); }
 .home-new { margin: 0 0 1.5rem; }
 /* Filled a touch darker than the hover colour: noticeable, not loud. */
 .home-new .button { background: #ebe5dc; border-color: #ebe5dc; font-weight: 500; }
@@ -345,6 +344,11 @@ details.disclosure.inline { margin-top: 0; }
 /* One-line notice on the home page after creating pieces or recording a step. */
 .notice { background: var(--success-bg); color: var(--success-ink); border-radius: var(--radius); padding: 0.75rem 1rem; margin: 0 0 1.5rem; }
 .notice a { color: inherit; }
+
+/* Admin: logging out, then the version. */
+.admin-session { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.admin-session form { margin: 0; }
+.admin-version { font-size: 0.8rem; color: var(--muted); }
 
 /* --- misc pages --- */
 

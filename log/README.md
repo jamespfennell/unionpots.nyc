@@ -91,9 +91,9 @@ backup before it reaches no target.
 | `-demo` | Demo mode: the password `potter` is shown on the login page, the log resets to sample pieces at startup and every hour, and photos can't be added or removed. Can't be combined with backup flags or `-password-hash`. |
 
 **Sessions.** Logins are signed with a random secret the app creates on
-first start, `<data-dir>/session-secret`. **Log out everywhere** in the menu
-replaces it, logging out every device (including the one you're on); so does
-deleting the file and restarting. Changing the password also logs everyone
+first start, `<data-dir>/session-secret`. **Log out everywhere** on the Admin
+page replaces it, logging out every device (including the one you're on); so
+does deleting the file and restarting. Changing the password also logs everyone
 out. (Not offered in the demo.)
 
 ## Commands

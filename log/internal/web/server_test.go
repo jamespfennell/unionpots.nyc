@@ -807,9 +807,23 @@ func TestMenuAndBackupsPage(t *testing.T) {
 	a.login()
 	home := a.do("GET", "/", nil).Body.String()
 	for _, want := range []string{`<a href="/">In progress</a>`, `href="/new">+ New project</a>`, `<a href="/new">New project</a>`, `href="/clays">Clays</a>`, `href="/glazes">Glazes</a>`,
-		`href="/backups">Backups</a>`, `action="/logout"`} {
+		"<a href=\"/firing\">Firing calculators</a>\n        <hr>\n        <a href=\"/admin\">Admin</a>"} {
 		if !strings.Contains(home, want) {
 			t.Errorf("home should contain %q", want)
+		}
+	}
+	// Backups, App ideas, logging out and the version are on the Admin page,
+	// not in the menu.
+	for _, moved := range []string{`href="/backups"`, `href="/ideas"`, `action="/logout"`, "Version"} {
+		if strings.Contains(home, moved) {
+			t.Errorf("menu shouldn't have %s", moved)
+		}
+	}
+	a.srv.Version = "abc1234"
+	admin := a.do("GET", "/admin", nil).Body.String()
+	for _, want := range []string{"<h1>Admin</h1>", `href="/backups"`, `href="/ideas"`, `action="/logout"`, "Version abc1234"} {
+		if !strings.Contains(admin, want) {
+			t.Errorf("Admin page should contain %q", want)
 		}
 	}
 	if !strings.Contains(a.do("GET", "/new", nil).Body.String(), "<h1>New project</h1>") {
@@ -949,8 +963,8 @@ func TestLogOutEverywhere(t *testing.T) {
 	a.login()
 	phone := a.cookie
 	a.login() // a second device
-	if !strings.Contains(a.do("GET", "/", nil).Body.String(), "Log out everywhere") {
-		t.Fatal("menu should offer Log out everywhere")
+	if !strings.Contains(a.do("GET", "/admin", nil).Body.String(), "Log out everywhere") {
+		t.Fatal("Admin page should offer Log out everywhere")
 	}
 	rec := a.do("POST", "/logout-everywhere", nil)
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/login?out=all" || rotated != 1 {
@@ -970,7 +984,7 @@ func TestLogOutEverywhere(t *testing.T) {
 	}
 	// Not in the demo.
 	a.srv.Demo = true
-	if strings.Contains(a.do("GET", "/", nil).Body.String(), "Log out everywhere") {
+	if strings.Contains(a.do("GET", "/admin", nil).Body.String(), "Log out everywhere") {
 		t.Errorf("demo shouldn't offer it")
 	}
 	if rec := a.do("POST", "/logout-everywhere", nil); rec.Code != 404 || rotated != 1 {
@@ -1165,8 +1179,8 @@ func TestIdeas(t *testing.T) {
 	a := newApp(t)
 	a.login()
 	ctx := context.Background()
-	if !strings.Contains(a.do("GET", "/", nil).Body.String(), `<a href="/ideas">App ideas</a>`) {
-		t.Errorf("menu should link to App ideas")
+	if !strings.Contains(a.do("GET", "/admin", nil).Body.String(), `href="/ideas"><span class="row-main">App ideas</span>`) {
+		t.Errorf("Admin page should link to App ideas")
 	}
 	a.do("POST", "/ideas", url.Values{"text": {"a search page"}})
 	a.do("POST", "/ideas", url.Values{"text": {"export to zip"}, "simple": {"1"}})

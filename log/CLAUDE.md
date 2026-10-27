@@ -5,9 +5,9 @@ running and deploying it.
 
 ## "Address the log.unionpots.nyc app ideas"
 
-The App ideas page (menu → App ideas) is a list of ideas for improving the
-log, written while using it. Each idea has a hidden 32-hex-character hash,
-and may be ticked **simple**.
+The App ideas page (menu → Admin → App ideas) is a list of ideas for
+improving the log, written while using it. Each idea has a hidden
+32-hex-character hash, and may be ticked **simple**.
 
 1. **Read the open ideas** from the public read-only feed,
    `https://log.unionpots.nyc/ideas/feed` (no login). It's plain text, in two

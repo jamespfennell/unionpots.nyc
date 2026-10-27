@@ -1,0 +1,20 @@
+{{define "content"}}
+<h1>Admin</h1>
+
+<section>
+  <div class="rows">
+    <a class="row row-two" href="/backups"><span class="row-main">Backups</span></a>
+    {{if .AppIdeas}}<a class="row row-two" href="/ideas"><span class="row-main">App ideas</span></a>{{end}}
+  </div>
+</section>
+
+<section class="admin-session">
+  <form method="post" action="/logout" hx-boost="false"><button class="button" type="submit">Log out</button></form>
+  {{if .LogOutEverywhere}}
+  <form method="post" action="/logout-everywhere" hx-boost="false"
+        onsubmit="return confirm('Log out on every device, including this one?')"><button class="button" type="submit">Log out everywhere</button></form>
+  {{end}}
+</section>
+
+{{with .Version}}<p class="admin-version">Version {{.}}</p>{{end}}
+{{end}}
