@@ -360,6 +360,32 @@ func homeNotice(q url.Values) string {
 	return ""
 }
 
+// markedHref is where a "Marked …" notice links: the piece, or for several
+// (always of one project) the project. Empty for other notices, or if the
+// pieces are gone.
+func (s *Server) markedHref(r *http.Request, q url.Values) string {
+	if homeNotice(q) == "" {
+		return ""
+	}
+	var ids []int64
+	for _, v := range strings.Split(q.Get("marked"), ",") {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	p, err := s.Store.GetPiece(r.Context(), ids[0])
+	if err != nil {
+		return ""
+	}
+	if len(ids) == 1 {
+		return fmt.Sprintf("/pieces/%d", p.ID)
+	}
+	return fmt.Sprintf("/projects/%d", p.ProjectID)
+}
+
 func joinIDs(ids []int64) string {
 	parts := make([]string, len(ids))
 	for i, id := range ids {
@@ -695,18 +721,20 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 	}
 	data := struct {
 		Page
-		Sections  []stateSection
-		Notice    string // what just happened, after creating pieces or recording a step
-		Studios   []db.Studio
-		Studio    int64 // the studio shown; 0 = all
-		ByProject bool  // one line per project ("?view=projects"); by piece by default
-	}{s.page(r, "Log"), sections, "", studios, studio, byProject}
+		Sections   []stateSection
+		Notice     string // what just happened, after creating pieces or recording a step
+		NoticeHref string // where the notice links: what was just marked
+		Studios    []db.Studio
+		Studio     int64 // the studio shown; 0 = all
+		ByProject  bool  // one line per project ("?view=projects"); by piece by default
+	}{s.page(r, "Log"), sections, "", "", studios, studio, byProject}
 	if len(studios) < 2 {
 		data.Studios = nil // nothing to filter by
 	}
 	if c, err := r.Cookie(flashCookie); err == nil {
 		if q, err := url.ParseQuery(c.Value); err == nil {
 			data.Notice = homeNotice(q)
+			data.NoticeHref = s.markedHref(r, q)
 		}
 		http.SetCookie(w, &http.Cookie{Name: flashCookie, Path: "/", MaxAge: -1})
 	}

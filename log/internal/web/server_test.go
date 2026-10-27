@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +83,14 @@ func (a *testApp) do(method, target string, form url.Values) *httptest.ResponseR
 
 // notice follows a redirect home the way a browser would, carrying its
 // one-off notice cookie, and returns the notice shown (or "").
+// notice is the text of the home page notice after rec (without its link).
 func (a *testApp) notice(rec *httptest.ResponseRecorder) string {
+	a.t.Helper()
+	return html.UnescapeString(regexp.MustCompile(`<[^>]*>`).ReplaceAllString(a.noticeHTML(rec), ""))
+}
+
+// noticeHTML is the home page notice after rec, as served.
+func (a *testApp) noticeHTML(rec *httptest.ResponseRecorder) string {
 	a.t.Helper()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(a.cookie)
@@ -100,7 +108,7 @@ func (a *testApp) notice(rec *httptest.ResponseRecorder) string {
 		return ""
 	}
 	start += len(open)
-	return html.UnescapeString(body[start : start+strings.Index(body[start:], "</p>")])
+	return body[start : start+strings.Index(body[start:], "</p>")]
 }
 
 func (a *testApp) login() {
@@ -692,6 +700,25 @@ func TestHomeNotice(t *testing.T) {
 		if got := homeNotice(v); got != want {
 			t.Errorf("homeNotice(%s) = %q, want %q", q, got, want)
 		}
+	}
+}
+
+func TestMarkedNoticeLinks(t *testing.T) {
+	a := newApp(t)
+	a.login()
+	a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}, "title": {"Cups"}})
+	p, _ := a.store.GetPiece(context.Background(), 120)
+	rec := a.do("POST", "/pieces/120/events", url.Values{"action": {"trimmed"}})
+	if got, want := a.noticeHTML(rec), `<a href="/pieces/120">Marked #120 trimmed.</a>`; got != want {
+		t.Errorf("one piece: notice %s, want %s", got, want)
+	}
+	a.do("POST", "/pieces/121/events", url.Values{"action": {"trimmed"}})
+	rec = a.do("POST", "/pieces/120/events", url.Values{"action": {"queued_bisque"}, "also": {"121"}})
+	if got, want := a.noticeHTML(rec), fmt.Sprintf(`<a href="/projects/%d">Marked #120 and #121 queued for bisque.</a>`, p.ProjectID); got != want {
+		t.Errorf("several pieces: notice %s, want %s", got, want)
+	}
+	if got := a.noticeHTML(a.do("POST", "/new", url.Values{"action": {"thrown"}})); got != "Created #122." {
+		t.Errorf("created notice isn't a link: %s", got)
 	}
 }
 

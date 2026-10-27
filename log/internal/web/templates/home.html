@@ -1,5 +1,5 @@
 {{define "content"}}
-{{with .Notice}}<p class="notice" role="status">{{.}}</p>{{end}}
+{{with .Notice}}<p class="notice" role="status">{{with $.NoticeHref}}<a href="{{.}}">{{$.Notice}}</a>{{else}}{{.}}{{end}}</p>{{end}}
 <p class="home-new"><a class="button block" href="/new">+ New project</a></p>
 <div class="filters">
   {{with .Studios}}
