@@ -1,18 +1,19 @@
 {{define "content"}}
 {{$p := .Piece}}
 {{/* Full screen over the page. Moving between photos replaces this one in
-     the history (the script), so Back and ✕ return to the piece. */}}
-<div class="viewer" data-viewer>
-  <div class="viewer-bar">
+     the history (the script), so Back and ✕ return to the piece. Tapping
+     the black (anything marked data-viewer-backdrop) closes it too. */}}
+<div class="viewer" data-viewer data-viewer-backdrop>
+  <div class="viewer-bar" data-viewer-backdrop>
     <a class="viewer-close" href="/pieces/{{$p.ID}}#photos" data-back aria-label="Close" data-viewer-close>✕</a>
     {{if gt .Count 1}}<span class="viewer-count">{{.Index}} of {{.Count}}</span>{{end}}
   </div>
-  <div class="viewer-stage" data-viewer-stage>
+  <div class="viewer-stage" data-viewer-stage data-viewer-backdrop>
     <img src="/photos/{{.Photo.SHA256}}_1600.jpg" width="{{.Photo.Width}}" height="{{.Photo.Height}}" alt="Photo of #{{$p.ID}}">
     {{with .Prev}}<a class="viewer-nav viewer-prev" href="/pieces/{{$p.ID}}/photos/{{.ID}}" hx-boost="false" data-viewer-prev aria-label="Previous photo">‹</a>{{end}}
     {{with .Next}}<a class="viewer-nav viewer-next" href="/pieces/{{$p.ID}}/photos/{{.ID}}" hx-boost="false" data-viewer-next aria-label="Next photo">›</a>{{end}}
   </div>
-  <div class="viewer-bar">
+  <div class="viewer-bar" data-viewer-backdrop>
     <span class="viewer-title">{{$p.Title}}</span>
     {{/* The script shares the photo file (to WhatsApp, Messages, …) where
          the browser can; otherwise this downloads it. */}}

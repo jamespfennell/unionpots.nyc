@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -163,6 +164,13 @@ func TestPhotoViewer(t *testing.T) {
 	}
 	if strings.Contains(page, "data-viewer-prev") {
 		t.Errorf("the first photo has no previous one")
+	}
+	// Tapping the black closes it; tapping the photo doesn't.
+	if !strings.Contains(page, `class="viewer-stage" data-viewer-stage data-viewer-backdrop`) || strings.Count(page, `class="viewer-bar" data-viewer-backdrop`) != 2 {
+		t.Errorf("the black around the photo should close the viewer:\n%s", page)
+	}
+	if regexp.MustCompile(`<img[^>]*data-viewer-backdrop`).MatchString(page) {
+		t.Errorf("the photo itself shouldn't close the viewer")
 	}
 	if page := a.do("GET", second, nil).Body.String(); !strings.Contains(page, "2 of 2") || !strings.Contains(page, `href="`+first+`" hx-boost="false" data-viewer-prev`) || strings.Contains(page, "data-viewer-next") {
 		t.Errorf("second photo:\n%s", page)
