@@ -703,7 +703,7 @@ func TestHomeNotice(t *testing.T) {
 	}
 }
 
-func TestMarkedNoticeLinks(t *testing.T) {
+func TestNoticeLinks(t *testing.T) {
 	a := newApp(t)
 	a.login()
 	a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}, "title": {"Cups"}})
@@ -717,8 +717,13 @@ func TestMarkedNoticeLinks(t *testing.T) {
 	if got, want := a.noticeHTML(rec), fmt.Sprintf(`<a href="/projects/%d">Marked #120 and #121 queued for bisque.</a>`, p.ProjectID); got != want {
 		t.Errorf("several pieces: notice %s, want %s", got, want)
 	}
-	if got := a.noticeHTML(a.do("POST", "/new", url.Values{"action": {"thrown"}})); got != "Created #122." {
-		t.Errorf("created notice isn't a link: %s", got)
+	if got, want := a.noticeHTML(a.do("POST", "/new", url.Values{"action": {"thrown"}})), `<a href="/pieces/122">Created #122.</a>`; got != want {
+		t.Errorf("one created piece: notice %s, want %s", got, want)
+	}
+	rec = a.do("POST", "/new", url.Values{"action": {"thrown"}, "count": {"2"}})
+	q, _ := a.store.GetPiece(context.Background(), 123)
+	if got, want := a.noticeHTML(rec), fmt.Sprintf(`<a href="/projects/%d">Created #123 and #124.</a>`, q.ProjectID); got != want {
+		t.Errorf("several created pieces: notice %s, want %s", got, want)
 	}
 }
 

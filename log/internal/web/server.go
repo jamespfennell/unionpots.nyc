@@ -362,15 +362,20 @@ func homeNotice(q url.Values) string {
 	return ""
 }
 
-// markedHref is where a "Marked …" notice links: the piece, or for several
-// (always of one project) the project. Empty for other notices, or if the
-// pieces are gone.
-func (s *Server) markedHref(r *http.Request, q url.Values) string {
+// noticeHref is where a "Created …" or "Marked …" notice links: the piece,
+// or for several (always of one project) the project. Empty if there's no
+// notice, or if the pieces are gone.
+func (s *Server) noticeHref(r *http.Request, q url.Values) string {
 	if homeNotice(q) == "" {
 		return ""
 	}
+	// As in homeNotice, "created" wins.
+	v := q.Get("created")
+	if v == "" {
+		v = q.Get("marked")
+	}
 	var ids []int64
-	for _, v := range strings.Split(q.Get("marked"), ",") {
+	for _, v := range strings.Split(v, ",") {
 		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
 			ids = append(ids, id)
 		}
@@ -725,7 +730,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 		Page
 		Sections   []stateSection
 		Notice     string // what just happened, after creating pieces or recording a step
-		NoticeHref string // where the notice links: what was just marked
+		NoticeHref string // where the notice links: what was just created or marked
 		Studios    []db.Studio
 		Studio     int64 // the studio shown; 0 = all
 		ByProject  bool  // one line per project ("?view=projects"); by piece by default
@@ -736,7 +741,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 	if c, err := r.Cookie(flashCookie); err == nil {
 		if q, err := url.ParseQuery(c.Value); err == nil {
 			data.Notice = homeNotice(q)
-			data.NoticeHref = s.markedHref(r, q)
+			data.NoticeHref = s.noticeHref(r, q)
 		}
 		http.SetCookie(w, &http.Cookie{Name: flashCookie, Path: "/", MaxAge: -1})
 	}
