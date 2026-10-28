@@ -1,8 +1,10 @@
 {{define "content"}}
 {{$p := .Piece}}
-{{/* Full screen over the page. Moving between photos replaces this one in
-     the history (the script), so Back and ✕ return to the piece where it
-     was (✕ is unboosted, or htmx would follow it to #photos). Tapping
+{{/* Full screen over the page. Moving between photos swaps this one in
+     place and replaces it in the history, so Back and ✕ return to the piece
+     where it was: staying on one page keeps the piece's scroll position in
+     every browser (Firefox loads it afresh, at the top, after a full page
+     load). ✕ is unboosted, or htmx would follow it to #photos. Tapping
      the black (anything marked data-viewer-backdrop) closes it too. */}}
 <div class="viewer" data-viewer data-viewer-backdrop>
   <div class="viewer-bar" data-viewer-backdrop>
@@ -11,8 +13,8 @@
   </div>
   <div class="viewer-stage" data-viewer-stage data-viewer-backdrop>
     <img src="/photos/{{.Photo.SHA256}}_1600.jpg" width="{{.Photo.Width}}" height="{{.Photo.Height}}" alt="Photo of #{{$p.ID}}">
-    {{with .Prev}}<a class="viewer-nav viewer-prev" href="/pieces/{{$p.ID}}/photos/{{.ID}}" hx-boost="false" data-viewer-prev aria-label="Previous photo">‹</a>{{end}}
-    {{with .Next}}<a class="viewer-nav viewer-next" href="/pieces/{{$p.ID}}/photos/{{.ID}}" hx-boost="false" data-viewer-next aria-label="Next photo">›</a>{{end}}
+    {{with .Prev}}<a class="viewer-nav viewer-prev" href="/pieces/{{$p.ID}}/photos/{{.ID}}" hx-headers='{"X-History": "replace"}' data-viewer-prev aria-label="Previous photo">‹</a>{{end}}
+    {{with .Next}}<a class="viewer-nav viewer-next" href="/pieces/{{$p.ID}}/photos/{{.ID}}" hx-headers='{"X-History": "replace"}' data-viewer-next aria-label="Next photo">›</a>{{end}}
   </div>
   <div class="viewer-bar" data-viewer-backdrop>
     <span class="viewer-title">{{$p.Title}}</span>

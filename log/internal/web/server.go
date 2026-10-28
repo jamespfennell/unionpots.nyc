@@ -143,8 +143,14 @@ func securityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A boosted form POST is answered with a redirect that the browser
 		// follows; tell htmx the final URL so history and reloads are right.
+		// A link sending "X-History: replace" (the photo viewer's arrows)
+		// replaces the current entry instead of adding one.
 		if r.Method == http.MethodGet && r.Header.Get("HX-Boosted") == "true" {
-			w.Header().Set("HX-Push-Url", r.URL.RequestURI())
+			if r.Header.Get("X-History") == "replace" {
+				w.Header().Set("HX-Replace-Url", r.URL.RequestURI())
+			} else {
+				w.Header().Set("HX-Push-Url", r.URL.RequestURI())
+			}
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")

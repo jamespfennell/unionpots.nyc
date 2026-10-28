@@ -154,7 +154,7 @@ func TestPhotoViewer(t *testing.T) {
 	page := a.do("GET", first, nil).Body.String()
 	for _, want := range []string{
 		`<img src="/photos/` + ps[0].SHA256 + `_1600.jpg"`, "1 of 2",
-		`href="` + second + `" hx-boost="false" data-viewer-next`,
+		`href="` + second + `" hx-headers='{"X-History": "replace"}' data-viewer-next`,
 		`href="/photos/` + ps[0].SHA256 + `_1600.jpg" download="union-pots-120-1.jpg"`,
 		`href="/pieces/120#photos" hx-boost="false" data-back`, // back, not to #photos: keeps the place
 	} {
@@ -172,8 +172,22 @@ func TestPhotoViewer(t *testing.T) {
 	if regexp.MustCompile(`<img[^>]*data-viewer-backdrop`).MatchString(page) {
 		t.Errorf("the photo itself shouldn't close the viewer")
 	}
-	if page := a.do("GET", second, nil).Body.String(); !strings.Contains(page, "2 of 2") || !strings.Contains(page, `href="`+first+`" hx-boost="false" data-viewer-prev`) || strings.Contains(page, "data-viewer-next") {
+	if page := a.do("GET", second, nil).Body.String(); !strings.Contains(page, "2 of 2") || !strings.Contains(page, `href="`+first+`" hx-headers='{"X-History": "replace"}' data-viewer-prev`) || strings.Contains(page, "data-viewer-next") {
 		t.Errorf("second photo:\n%s", page)
+	}
+
+	// The arrows replace the viewer in the history rather than adding to it,
+	// so closing it goes straight back to the piece where it was.
+	for header, want := range map[string]string{"": "HX-Push-Url", "replace": "HX-Replace-Url"} {
+		req := httptest.NewRequest("GET", second, nil)
+		req.Header.Set("HX-Boosted", "true")
+		req.Header.Set("X-History", header)
+		req.AddCookie(a.cookie)
+		rec := httptest.NewRecorder()
+		a.h.ServeHTTP(rec, req)
+		if rec.Header().Get(want) != second {
+			t.Errorf("X-History %q: want %s: %s, got %v", header, want, second, rec.Header())
+		}
 	}
 
 	// A piece's only photo: no count, a plain file name.

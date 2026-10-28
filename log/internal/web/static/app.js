@@ -442,19 +442,14 @@
   });
 
   // --- Photo viewer -------------------------------------------------------
-  // Moving between photos (arrows, swipes, ← →) replaces the page in the
-  // history, so Back and ✕ (or Escape, or tapping the black around the
-  // photo) go straight back to the piece.
+  // Moving between photos (arrows, swipes, ← →) swaps the page and replaces
+  // it in the history (the arrows send X-History: replace), so Back and ✕ (or
+  // Escape, or tapping the black around the photo) go straight back to the
+  // piece.
   function viewerGo(which) {
     var link = document.querySelector("[data-viewer-" + which + "]");
-    if (link) location.replace(link.href);
+    if (link) link.click();
   }
-  document.addEventListener("click", function (e) {
-    var nav = e.target.closest && e.target.closest("[data-viewer-prev], [data-viewer-next]");
-    if (!nav) return;
-    e.preventDefault();
-    location.replace(nav.href);
-  });
   document.addEventListener("click", function (e) {
     // Only the black itself: not the photo, the text or the buttons on it.
     if (!e.target.hasAttribute || !e.target.hasAttribute("data-viewer-backdrop")) return;
