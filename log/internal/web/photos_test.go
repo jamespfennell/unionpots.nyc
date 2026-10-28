@@ -156,7 +156,7 @@ func TestPhotoViewer(t *testing.T) {
 		`<img src="/photos/` + ps[0].SHA256 + `_1600.jpg"`, "1 of 2",
 		`href="` + second + `" hx-boost="false" data-viewer-next`,
 		`href="/photos/` + ps[0].SHA256 + `_1600.jpg" download="union-pots-120-1.jpg"`,
-		`href="/pieces/120#photos" data-back`,
+		`href="/pieces/120#photos" hx-boost="false" data-back`, // back, not to #photos: keeps the place
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("viewer should have %s:\n%s", want, page)

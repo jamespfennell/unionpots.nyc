@@ -1,11 +1,12 @@
 {{define "content"}}
 {{$p := .Piece}}
 {{/* Full screen over the page. Moving between photos replaces this one in
-     the history (the script), so Back and ✕ return to the piece. Tapping
+     the history (the script), so Back and ✕ return to the piece where it
+     was (✕ is unboosted, or htmx would follow it to #photos). Tapping
      the black (anything marked data-viewer-backdrop) closes it too. */}}
 <div class="viewer" data-viewer data-viewer-backdrop>
   <div class="viewer-bar" data-viewer-backdrop>
-    <a class="viewer-close" href="/pieces/{{$p.ID}}#photos" data-back aria-label="Close" data-viewer-close>✕</a>
+    <a class="viewer-close" href="/pieces/{{$p.ID}}#photos" hx-boost="false" data-back aria-label="Close" data-viewer-close>✕</a>
     {{if gt .Count 1}}<span class="viewer-count">{{.Index}} of {{.Count}}</span>{{end}}
   </div>
   <div class="viewer-stage" data-viewer-stage data-viewer-backdrop>
