@@ -4,7 +4,7 @@
 {{range .Studios}}
 <section class="studio">
   <form method="post" action="/studios/{{.ID}}" class="stack" data-autosave
-        hx-post="/studios/{{.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+        hx-post="/studios/{{.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none" hx-disinherit="*">
     <input type="hidden" name="autosave" value="1">
     <label class="field">Name <span class="save-status" data-save-status aria-live="polite"></span>
       <input autocomplete="off" name="title" value="{{.Name}}" required>

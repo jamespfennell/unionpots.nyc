@@ -1363,13 +1363,13 @@ func TestClayPillsOneByDefault(t *testing.T) {
 	brown, _ := a.store.EnsureClay(ctx, "Brown")
 	black, _ := a.store.EnsureClay(ctx, "Black")
 	page := a.do("GET", "/new", nil).Body.String()
-	if !strings.Contains(page, `<fieldset class="pills" data-clay-pills>`) || !strings.Contains(page, "+ another clay") {
-		t.Errorf("New should offer one clay, with + another clay")
+	if !strings.Contains(page, `<input type="checkbox" data-clay-multi> Multiple clays`) {
+		t.Errorf("New should offer one clay, with Multiple clays unticked")
 	}
-	// A piece with two clays starts in multi mode, without the link.
+	// A piece with two clays starts with Multiple clays ticked.
 	ids, _ := a.store.CreatePieces(ctx, db.NewPieces{Count: 1, Action: model.Thrown, Date: "2026-10-01", ClayIDs: []int64{brown, black}})
 	edit := a.do("GET", fmt.Sprintf("/pieces/%d/edit", ids[0]), nil).Body.String()
-	if !strings.Contains(edit, `data-clay-pills data-multi>`) || strings.Contains(edit, "+ another clay") {
+	if !strings.Contains(edit, `<input type="checkbox" data-clay-multi checked> Multiple clays`) {
 		t.Errorf("a piece with two clays should start in multi mode")
 	}
 	// The server still accepts several.

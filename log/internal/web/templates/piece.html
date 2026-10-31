@@ -58,7 +58,7 @@
 <section>
   <h2>Freeform notes <span class="save-status" data-save-status aria-live="polite"></span></h2>
   <form method="post" action="/pieces/{{$p.ID}}" data-autosave
-        hx-post="/pieces/{{$p.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+        hx-post="/pieces/{{$p.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none" hx-disinherit="*">
     <input type="hidden" name="autosave" value="1">
     <textarea autocomplete="off" name="notes" rows="4" aria-label="Freeform notes">{{$p.Notes}}</textarea>
   </form>

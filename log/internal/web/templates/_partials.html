@@ -44,19 +44,19 @@
 {{/* Clay body pills (several can be chosen). The label links to the clay
      list, where clay bodies are added and edited. Args: Clays, Selected. */}}
 {{/* Clay pills. A piece is almost always one clay, so tapping a clay
-     deselects the others; "+ another clay" allows several (and a piece that
-     already has several starts that way). Without the script they're plain
-     checkboxes. Args: Clays, Selected (ids). */}}
+     deselects the others; ticking "Multiple clays" lets several be chosen
+     (a piece that already has several starts ticked). Without the script
+     they're plain checkboxes. Args: Clays, Selected (ids). */}}
 {{define "clayPills"}}
-<fieldset class="pills" data-clay-pills{{if gt (len .Selected) 1}} data-multi{{end}}>
+<fieldset class="pills" data-clay-pills>
   <legend>Clay <span class="legend-link">(<a href="/clays">manage clays</a>)</span></legend>
   <div class="pill-row">
     {{range .Clays}}
     <label class="pill"><input type="checkbox" name="clay" value="{{.ID}}" class="visually-hidden"{{if hasID $.Selected .ID}} checked{{end}}><span>{{.Name}}</span></label>
     {{end}}
   </div>
-  {{if and (gt (len .Clays) 1) (le (len .Selected) 1)}}
-  <button type="button" class="link-button clay-multi" data-clay-multi>+ another clay</button>
+  {{if or (gt (len .Clays) 1) (gt (len .Selected) 1)}}
+  <label class="check clay-multi"><input type="checkbox" data-clay-multi{{if gt (len .Selected) 1}} checked{{end}}> Multiple clays</label>
   {{end}}
 </fieldset>
 {{end}}
@@ -143,7 +143,7 @@
 <section>
   <h2>Ratings <span class="save-status" data-save-status aria-live="polite"></span></h2>
   <form method="post" action="/pieces/{{.Piece.ID}}/ratings" class="stack" data-autosave
-        hx-post="/pieces/{{.Piece.ID}}/ratings" hx-trigger="change, submit" hx-swap="none">
+        hx-post="/pieces/{{.Piece.ID}}/ratings" hx-trigger="change, submit" hx-swap="none" hx-disinherit="*">
     <input type="hidden" name="autosave" value="1">
     {{template "ratingPills" .Ratings}}
   </form>

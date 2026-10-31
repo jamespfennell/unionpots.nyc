@@ -12,7 +12,7 @@
 <section>
   <h2>Details <span class="save-status" data-save-status aria-live="polite"></span></h2>
   <form method="post" action="/projects/{{$proj.ID}}" class="stack" data-autosave
-        hx-post="/projects/{{$proj.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+        hx-post="/projects/{{$proj.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none" hx-disinherit="*">
     <input type="hidden" name="autosave" value="1">
     <label class="field">Name <input autocomplete="off" name="title" value="{{$proj.Name}}" placeholder="e.g. Set of 4 bowls"></label>
     <label class="field">Notes <textarea autocomplete="off" name="notes" rows="4">{{$proj.Notes}}</textarea></label>

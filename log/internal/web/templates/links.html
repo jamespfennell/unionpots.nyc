@@ -23,7 +23,7 @@
   {{range .Links}}
   <section>
     <form method="post" action="/links/{{.ID}}" class="stack" data-autosave
-          hx-post="/links/{{.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none">
+          hx-post="/links/{{.ID}}" hx-trigger="input delay:600ms, change, submit" hx-swap="none" hx-disinherit="*">
       <input type="hidden" name="autosave" value="1">
       <label class="field">Title <span class="save-status" data-save-status aria-live="polite"></span>
         <input name="title" value="{{.Title}}" required autocomplete="off">

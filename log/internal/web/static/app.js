@@ -399,23 +399,30 @@
     next(0);
   });
 
-  // Clay pills: one clay unless "+ another clay" was tapped. This runs in the
-  // capture phase, before htmx's autosave reads the form, so only the new
-  // choice is saved.
+  // Clay pills: one clay unless "Multiple clays" is ticked. This runs in
+  // the capture phase, before htmx's autosave reads the form, so only the
+  // new choice is saved. Unticking it keeps the clay tapped last.
+  function keepOneClay(pills, keep) {
+    pills.querySelectorAll('input[name="clay"]').forEach(function (other) {
+      if (other !== keep) other.checked = false;
+    });
+  }
   document.addEventListener("change", function (e) {
     var input = e.target;
-    var pills = input.matches && input.matches('input[name="clay"]') && input.closest("[data-clay-pills]");
-    if (!pills || !input.checked || pills.hasAttribute("data-multi")) return;
-    pills.querySelectorAll('input[name="clay"]').forEach(function (other) {
-      if (other !== input) other.checked = false;
-    });
+    var pills = input.closest && input.closest("[data-clay-pills]");
+    if (!pills) return;
+    var multi = pills.querySelector("[data-clay-multi]");
+    if (input === multi) {
+      if (multi.checked) return;
+      var last = pills._lastClay && pills._lastClay.checked ? pills._lastClay
+        : pills.querySelector('input[name="clay"]:checked');
+      keepOneClay(pills, last);
+      return;
+    }
+    if (!input.matches('input[name="clay"]') || !input.checked) return;
+    pills._lastClay = input;
+    if (!multi || !multi.checked) keepOneClay(pills, input);
   }, true);
-  document.addEventListener("click", function (e) {
-    var link = e.target.closest && e.target.closest("[data-clay-multi]");
-    if (!link) return;
-    link.closest("[data-clay-pills]").setAttribute("data-multi", "");
-    link.hidden = true;
-  });
 
   // Step dates save as soon as a date in range is picked (a half-typed
   // date is out of range, so it waits).
